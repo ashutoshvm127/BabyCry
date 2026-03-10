@@ -1,0 +1,145 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+
+# Translations
+*.mo
+*.pot
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Spyder project settings
+.spyderproject
+.spyproject
+
+# Rope project settings
+.ropeproject
+
+# mkdocs documentation
+/site
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# VS Code
+.vscode/
+*.code-workspace
+
+# PyCharm
+.idea/
+
+# Model files (large binary files)
+*.pt
+*.pth
+*.onnx
+*.h5
+*.pkl
+*.joblib
+*.bin
+*.safetensors
+
+# Audio files (training data - too large for git)
+*.wav
+*.mp3
+*.flac
+*.ogg
+*.m4a
+
+# Downloaded datasets
+downloads/
+data_*/
+
+# Trained models and outputs
+trained_classifiers/
+models_pretrained/
+best_*_model/
+cnn_*_model/
+rf_*_model/
+model_*/
+output_graphs/
+combined_diagnostic_model/
+
+# Logs and outputs
+*.log
+*.txt
+!requirements.txt
+!README.txt
+!START_HERE.txt
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+
+# Credentials and secrets
+token.txt
+*.key
+*.pem
+secrets.json
+credentials.json
+
+# Docker
+*.tar

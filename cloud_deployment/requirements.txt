@@ -1,0 +1,56 @@
+# ==============================================================================
+# FastAPI Backend Dependencies for Cloud Deployment
+# Optimized for Render, Railway, Fly.io
+# ==============================================================================
+
+# FastAPI & ASGI
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+uvloop>=0.19.0
+httptools>=0.6.0
+python-multipart>=0.0.6
+websockets>=12.0
+
+# Data validation
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+
+# Environment & Configuration
+python-dotenv>=1.0.0
+
+# Audio Processing
+librosa>=0.10.1
+soundfile>=0.12.1
+scipy>=1.11.0
+numpy>=1.24.0,<2.0.0
+
+# Machine Learning - Core (installed separately in Dockerfile)
+# torch>=2.0.0
+# torchaudio>=2.0.0
+transformers>=4.35.0
+
+# TensorFlow (CPU version for cloud)
+# tensorflow-cpu>=2.14.0
+# tensorflow_hub>=0.15.0
+
+# PDF Generation
+reportlab>=4.0.0
+fpdf2>=2.7.0
+
+# Data Downloads
+requests>=2.31.0
+huggingface_hub>=0.19.0
+
+# Utilities
+tqdm>=4.66.0
+pillow>=10.0.0
+matplotlib>=3.8.0
+aiofiles>=23.2.0
+
+# Monitoring
+prometheus-client>=0.19.0
+
+# Development (optional)
+# pytest>=7.4.0
+# pytest-asyncio>=0.21.0
+# httpx>=0.25.0

@@ -1,0 +1,33 @@
+{
+  "is_rpi5_mode": false,
+  "audio": {
+    "sample_rate": 16000,
+    "bit_depth": 16,
+    "channels": 1,
+    "buffer_duration": 3.0,
+    "device_index": null
+  },
+  "rpi5": {
+    "i2s_enabled": true,
+    "gpio_ws": 19,
+    "gpio_sck": 18,
+    "gpio_sd": 20,
+    "inmp441_bit_depth": 24,
+    "inmp441_sample_rate": 44100
+  },
+  "desktop": {
+    "use_default_mic": true,
+    "preferred_device_name": null
+  },
+  "server": {
+    "host": "localhost",
+    "port": 8000,
+    "use_ssl": false,
+    "websocket_path": "/ws/stream"
+  },
+  "model_cache_dir": "./model_cache",
+  "reports_dir": "./reports",
+  "logs_dir": "./logs",
+  "debug": false,
+  "log_level": "INFO"
+}

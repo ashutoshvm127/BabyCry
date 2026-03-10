@@ -1,0 +1,7 @@
+{
+  "num_labels": 8,
+  "hidden_size": 768,
+  "pretrained_model": "facebook/wav2vec2-base",
+  "best_val_acc": 58.54922279792746,
+  "epoch": 2
+}

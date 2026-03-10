@@ -1,0 +1,1 @@
+{"label_to_idx": {"cold_cry": 0, "discomfort_cry": 1, "distress_cry": 2, "hungry_cry": 3, "normal_cry": 4, "pain_cry": 5, "sleepy_cry": 6, "tired_cry": 7}, "idx_to_label": {"0": "cold_cry", "1": "discomfort_cry", "2": "distress_cry", "3": "hungry_cry", "4": "normal_cry", "5": "pain_cry", "6": "sleepy_cry", "7": "tired_cry"}}

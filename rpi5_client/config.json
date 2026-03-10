@@ -1,0 +1,34 @@
+{
+  "cloud": {
+    "api_url": "https://baby-cry-api.onrender.com",
+    "ws_url": "wss://baby-cry-api.onrender.com/ws/stream",
+    "api_key": "",
+    "reconnect_interval": 5,
+    "ping_interval": 30,
+    "connection_timeout": 30
+  },
+  "audio": {
+    "sample_rate": 16000,
+    "bit_depth": 16,
+    "channels": 1,
+    "buffer_duration": 3.0,
+    "device_index": null,
+    "inmp441_sample_rate": 44100,
+    "inmp441_bit_depth": 24
+  },
+  "hardware": {
+    "display_enabled": true,
+    "display_type": "ssd1306",
+    "display_width": 128,
+    "display_height": 64,
+    "display_i2c_address": 60,
+    "speaker_enabled": true,
+    "speaker_gpio": 17,
+    "led_enabled": true,
+    "led_gpio_green": 22,
+    "led_gpio_yellow": 23,
+    "led_gpio_red": 24
+  },
+  "offline_buffer_size": 100,
+  "log_level": "INFO"
+}

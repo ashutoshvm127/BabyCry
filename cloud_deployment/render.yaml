@@ -1,0 +1,99 @@
+# ==============================================================================
+# Render.com Deployment Configuration
+# Baby Cry Diagnostic System - Cloud AI Backend
+# ==============================================================================
+# 
+# Deploy: Connect GitHub repo to Render, it will auto-detect this file
+# Manual: Use render.yaml blueprint in Render Dashboard
+#
+# ==============================================================================
+
+services:
+  # ===========================================================================
+  # Main API Backend (FastAPI + AI Ensemble)
+  # ===========================================================================
+  - type: web
+    name: baby-cry-api
+    runtime: docker
+    dockerfilePath: ./cloud_deployment/Dockerfile
+    dockerContext: .
+    
+    # Scaling & Region
+    region: oregon  # Change to nearest region (oregon, ohio, frankfurt, singapore)
+    plan: starter   # starter ($7/mo) | standard ($25/mo) | pro for GPU
+    
+    # Health Check
+    healthCheckPath: /health
+    
+    # Auto-deploy on push
+    autoDeploy: true
+    
+    # Environment Variables
+    envVars:
+      # Model Configuration
+      - key: MODEL_CACHE_DIR
+        value: /tmp/model_cache
+      - key: USE_GPU
+        value: "false"
+      
+      # Logging
+      - key: LOG_LEVEL
+        value: INFO
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      
+      # CORS (allow all for development, restrict in production)
+      - key: CORS_ORIGINS
+        value: "*"
+      
+      # HuggingFace Token (for model downloads)
+      - key: HUGGINGFACE_TOKEN
+        sync: false  # Set manually in Render dashboard
+      
+      # Port (Render injects this)
+      - key: PORT
+        value: "10000"
+    
+    # Build Command
+    buildCommand: |
+      pip install --upgrade pip
+      pip install -r cloud_deployment/requirements.txt
+    
+    # Start Command
+    startCommand: |
+      cd cloud_deployment && uvicorn main:app --host 0.0.0.0 --port $PORT
+    
+    # Persistent Disk for model cache (optional)
+    disk:
+      name: model-cache
+      mountPath: /app/model_cache
+      sizeGB: 10
+
+  # ===========================================================================
+  # Redis Cache (Optional - for session persistence)
+  # ===========================================================================
+  - type: redis
+    name: baby-cry-cache
+    plan: free
+    maxmemoryPolicy: allkeys-lru
+    ipAllowList: []  # Allow all IPs
+
+# ==============================================================================
+# Database (PostgreSQL - Optional for result storage)
+# ==============================================================================
+databases:
+  - name: baby-cry-db
+    plan: free
+    databaseName: babycry
+    user: babycry
+
+# ==============================================================================
+# Environment Groups
+# ==============================================================================
+envGroups:
+  - name: baby-cry-secrets
+    envVars:
+      - key: HUGGINGFACE_TOKEN
+        sync: false
+      - key: SECRET_KEY
+        generateValue: true  # Auto-generate a secure key

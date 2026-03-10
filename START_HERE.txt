@@ -1,0 +1,110 @@
+================================================================================
+                    QUICK START - RUN THIS FIRST
+================================================================================
+
+You only need to run ONE command to start training:
+
+    python train_maximum_accuracy.py
+
+That's it! The script will automatically handle EVERYTHING:
+  ✓ Install missing packages
+  ✓ Download 1000-5000+ audio files from 40+ sources
+  ✓ Download the Wav2Vec2 model from HuggingFace
+  ✓ Organize the data
+  ✓ Train the model
+  ✓ Save the trained model
+
+================================================================================
+                            HOW TO RUN
+================================================================================
+
+OPTION 1: Simple (Recommended for Windows)
+-------------------------------------------
+1. Open Command Prompt or PowerShell
+2. Navigate to: d:\projects\cry analysuis
+3. Type: python train_maximum_accuracy.py
+4. Press Enter
+5. Wait for training to complete (1-4 hours with GPU, 8-12 hours with CPU)
+
+OPTION 2: Using the launcher (Windows only)
+---------------------------------------------
+1. Double-click: run_training.bat
+2. Wait for training to complete
+
+OPTION 3: From command line with logging
+------------------------------------------
+python train_maximum_accuracy.py > training.log 2>&1
+
+================================================================================
+                        WHAT WILL HAPPEN
+================================================================================
+
+STEP 1: Setup (1-2 minutes)
+  - Installs PyTorch, librosa, transformers, etc.
+  - Checks for NumPy 2.x compatibility
+  - Ready for download
+
+STEP 2: Download Data (5-30 minutes)
+  - Downloads from GitHub (12+ repos)
+  - Downloads from Kaggle (13+ datasets)  
+  - Downloads from Zenodo (8+ collections)
+  - Total: 1000-5000+ audio files
+  - Will prompt for Kaggle/HuggingFace tokens if you want more data
+
+STEP 3: Download Model (2-5 minutes)
+  - Downloads Wav2Vec2 from HuggingFace (~1.3GB)
+  - Verifies model integrity
+  - Ready for training
+
+STEP 4: Prepare Data (2-5 minutes)
+  - Organizes files into 10 classes
+  - Splits into training/validation sets
+  - Ready for training
+
+STEP 5: Train Model (1-4 hours with GPU, 8-12 hours with CPU)
+  - Stage 1: Learns respiratory disease patterns (250 epochs)
+  - Stage 2: Learns baby cry classification (250 epochs)
+  - Saves trained model to: ./ast_baby_cry_optimized/
+
+================================================================================
+                    SYSTEM REQUIREMENTS
+================================================================================
+
+Minimum (will work, but slow):
+  - Python 3.8+
+  - 8GB RAM
+  - 20GB free disk space
+  - Internet connection (50+ Mbps for downloads)
+  - Training time: 8-12 hours on CPU
+
+Recommended (best experience):
+  - Python 3.8+
+  - 16GB+ RAM
+  - 20GB free disk space
+  - NVIDIA GPU (RTX 2060+)
+  - Internet connection (50+ Mbps for downloads)
+  - Training time: 1-4 hours on GPU
+
+================================================================================
+                        BEFORE YOU START
+================================================================================
+
+✓ Check you have 20GB+ free disk space
+✓ Make sure internet connection is stable
+✓ Close other programs to free up RAM
+✓ If using GPU: NVIDIA drivers are up to date
+
+================================================================================
+                      READY TO START?
+================================================================================
+
+Run this command:
+
+    cd "d:\projects\cry analysuis"
+    python train_maximum_accuracy.py
+
+The script will guide you through each step automatically!
+
+Questions? Check QUICK_START.md or SETUP_COMPLETE.md for more details.
+
+================================================================================
