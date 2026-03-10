@@ -15,8 +15,7 @@ services:
   - type: web
     name: baby-cry-api
     runtime: docker
-    dockerfilePath: ./cloud_deployment/Dockerfile
-    dockerContext: .
+    rootDir: cloud_deployment
     
     # Scaling & Region
     region: oregon  # Change to nearest region (oregon, ohio, frankfurt, singapore)

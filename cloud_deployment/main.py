@@ -47,10 +47,8 @@ class Settings:
     PORT = int(os.environ.get("PORT", 10000))
     HUGGINGFACE_TOKEN = os.environ.get("HUGGINGFACE_TOKEN")
     
-    # Trained model paths
-    TRAINED_CLASSIFIERS_DIR = Path(__file__).parent.parent / "trained_classifiers"
-    AST_CRY_MODEL_DIR = Path(__file__).parent.parent / "ast_baby_cry_optimized"
-    AST_RESPIRATORY_MODEL_DIR = Path(__file__).parent.parent / "ast_respiratory_optimized"
+    # Models are downloaded from HuggingFace at runtime
+    # No local trained classifier dependencies
 
 settings = Settings()
 
