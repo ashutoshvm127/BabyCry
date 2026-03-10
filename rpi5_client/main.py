@@ -1,898 +1,589 @@
 #!/usr/bin/env python3
 """
-Raspberry Pi 5 - Baby Cry Monitor Client
-Captures audio from INMP441 I2S microphone and streams to cloud API
+RPi5 Audio Capture Client - Lightweight Version
 
-Features:
-- Real-time audio capture from INMP441 I2S microphone
-- WebSocket streaming to cloud API
-- Local LCD/OLED display for status
-- Audio alerts via speaker/buzzer
-- Offline buffering with retry
-- Auto-reconnection to cloud
+This client ONLY handles:
+- Audio recording from INMP441 I2S microphone
+- Basic waveform preprocessing (normalize, trim)
+- Sending audio to Windows laptop for AI processing
+- Displaying results
+
+ALL AI processing happens on the laptop.
 """
 
 import os
-import sys
+import io
 import json
 import time
+import wave
 import asyncio
 import logging
-import threading
-import struct
+import argparse
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Dict, Any, Callable
-from dataclasses import dataclass, field
-from queue import Queue, Empty
-from collections import deque
 
-# Setup logging
+import numpy as np
+
+# Configure logging
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler("/tmp/baby_cry_client.log")
-    ]
+    format='%(asctime)s - %(levelname)s - %(message)s'
 )
-logger = logging.getLogger("BabyCryClient")
-
+logger = logging.getLogger(__name__)
 
 # ==============================================================================
 # Configuration
 # ==============================================================================
 
-@dataclass
-class CloudConfig:
-    """Cloud connection settings"""
-    api_url: str = "https://baby-cry-api.onrender.com"
-    ws_url: str = "wss://baby-cry-api.onrender.com/ws/stream"
-    api_key: str = ""
-    reconnect_interval: int = 5
-    ping_interval: int = 30
-    connection_timeout: int = 30
+DEFAULT_CONFIG = {
+    "server_url": "http://192.168.1.100:8080",  # Your laptop IP
+    "api_key": "test-key",
+    "sample_rate": 16000,
+    "channels": 1,
+    "chunk_duration": 5.0,  # seconds per chunk
+    "recording_device": None,  # Auto-detect
+    "save_recordings": True,
+    "recordings_dir": "recordings",
+    "display_enabled": False,  # Set True if you have OLED display
+    "led_enabled": False,  # Set True if you have LEDs connected
+}
 
-
-@dataclass
-class AudioConfig:
-    """Audio capture settings"""
-    sample_rate: int = 16000  # Will resample from 44100
-    bit_depth: int = 16
-    channels: int = 1
-    buffer_duration: float = 3.0
-    device_index: Optional[int] = None
-    
-    # INMP441 native settings
-    inmp441_sample_rate: int = 44100
-    inmp441_bit_depth: int = 24
-
-
-@dataclass
-class HardwareConfig:
-    """Hardware settings"""
-    # Display (SSD1306 OLED)
-    display_enabled: bool = True
-    display_type: str = "ssd1306"  # ssd1306, st7735, none
-    display_width: int = 128
-    display_height: int = 64
-    display_i2c_address: int = 0x3C
-    
-    # Speaker/Buzzer
-    speaker_enabled: bool = True
-    speaker_gpio: int = 17
-    
-    # LED Status
-    led_enabled: bool = True
-    led_gpio_green: int = 22
-    led_gpio_yellow: int = 23
-    led_gpio_red: int = 24
-
-
-@dataclass
-class ClientConfig:
-    """Complete client configuration"""
-    cloud: CloudConfig = field(default_factory=CloudConfig)
-    audio: AudioConfig = field(default_factory=AudioConfig)
-    hardware: HardwareConfig = field(default_factory=HardwareConfig)
-    
-    # Runtime settings
-    offline_buffer_size: int = 100  # Number of audio chunks to buffer offline
-    log_level: str = "INFO"
-    
-    @classmethod
-    def from_file(cls, path: str = "config.json") -> "ClientConfig":
-        """Load configuration from JSON file"""
-        config_path = Path(path)
-        if not config_path.exists():
-            logger.warning(f"Config file not found: {path}, using defaults")
-            return cls()
-        
-        with open(config_path, 'r') as f:
-            data = json.load(f)
-        
-        return cls(
-            cloud=CloudConfig(**data.get("cloud", {})),
-            audio=AudioConfig(**data.get("audio", {})),
-            hardware=HardwareConfig(**data.get("hardware", {})),
-            offline_buffer_size=data.get("offline_buffer_size", 100),
-            log_level=data.get("log_level", "INFO")
-        )
-    
-    def save(self, path: str = "config.json"):
-        """Save configuration to JSON file"""
-        data = {
-            "cloud": {
-                "api_url": self.cloud.api_url,
-                "ws_url": self.cloud.ws_url,
-                "api_key": self.cloud.api_key,
-                "reconnect_interval": self.cloud.reconnect_interval,
-                "ping_interval": self.cloud.ping_interval,
-                "connection_timeout": self.cloud.connection_timeout
-            },
-            "audio": {
-                "sample_rate": self.audio.sample_rate,
-                "bit_depth": self.audio.bit_depth,
-                "channels": self.audio.channels,
-                "buffer_duration": self.audio.buffer_duration,
-                "device_index": self.audio.device_index,
-                "inmp441_sample_rate": self.audio.inmp441_sample_rate,
-                "inmp441_bit_depth": self.audio.inmp441_bit_depth
-            },
-            "hardware": {
-                "display_enabled": self.hardware.display_enabled,
-                "display_type": self.hardware.display_type,
-                "display_width": self.hardware.display_width,
-                "display_height": self.hardware.display_height,
-                "display_i2c_address": self.hardware.display_i2c_address,
-                "speaker_enabled": self.hardware.speaker_enabled,
-                "speaker_gpio": self.hardware.speaker_gpio,
-                "led_enabled": self.hardware.led_enabled,
-                "led_gpio_green": self.hardware.led_gpio_green,
-                "led_gpio_yellow": self.hardware.led_gpio_yellow,
-                "led_gpio_red": self.hardware.led_gpio_red
-            },
-            "offline_buffer_size": self.offline_buffer_size,
-            "log_level": self.log_level
-        }
-        
-        with open(path, 'w') as f:
-            json.dump(data, f, indent=2)
-
-
-# ==============================================================================
-# Audio Capture
-# ==============================================================================
 
 class AudioCapture:
     """
-    Audio capture from INMP441 I2S microphone
-    
-    Wiring:
-    - VDD → 3.3V
-    - GND → GND
-    - WS  → GPIO 19 (I2S Frame Sync)
-    - SCK → GPIO 18 (I2S Clock)
-    - SD  → GPIO 20 (I2S Data In)
+    Handles audio recording from microphone.
+    Works with INMP441 I2S mic or any ALSA device.
     """
     
-    def __init__(self, config: AudioConfig, callback: Callable[[bytes], None]):
-        self.config = config
-        self.callback = callback
-        self.is_running = False
-        self._thread: Optional[threading.Thread] = None
-        self._backend = None
+    def __init__(self, sample_rate=16000, channels=1, chunk_duration=5.0, device=None):
+        self.sample_rate = sample_rate
+        self.channels = channels
+        self.chunk_duration = chunk_duration
+        self.chunk_samples = int(sample_rate * chunk_duration)
+        self.device = device
+        self.stream = None
+        self.audio_interface = None
         
-        self._init_backend()
-    
-    def _init_backend(self):
-        """Initialize audio capture backend"""
-        # Try PyAudio first
+    def initialize(self):
+        """Initialize audio capture"""
         try:
-            import pyaudio
-            self._backend = "pyaudio"
-            self._pa = pyaudio.PyAudio()
-            logger.info("Using PyAudio backend")
-            return
-        except ImportError:
-            pass
-        
-        # Try sounddevice
-        try:
-            import sounddevice
-            self._backend = "sounddevice"
-            logger.info("Using SoundDevice backend")
-            return
-        except ImportError:
-            pass
-        
-        # Try alsaaudio (Linux/RPi)
-        try:
-            import alsaaudio
-            self._backend = "alsaaudio"
-            logger.info("Using ALSA backend")
-            return
-        except ImportError:
-            pass
-        
-        logger.error("No audio backend available!")
-        logger.error("Install with: pip install pyaudio sounddevice")
-        logger.error("Or on RPi: sudo apt install python3-alsaaudio")
-    
-    def list_devices(self) -> list:
-        """List available audio input devices"""
-        devices = []
-        
-        if self._backend == "pyaudio":
-            for i in range(self._pa.get_device_count()):
-                info = self._pa.get_device_info_by_index(i)
-                if info['maxInputChannels'] > 0:
-                    devices.append({
-                        'index': i,
-                        'name': info['name'],
-                        'channels': info['maxInputChannels'],
-                        'sample_rate': int(info['defaultSampleRate'])
-                    })
-        
-        elif self._backend == "sounddevice":
             import sounddevice as sd
-            for i, device in enumerate(sd.query_devices()):
-                if device['max_input_channels'] > 0:
-                    devices.append({
-                        'index': i,
-                        'name': device['name'],
-                        'channels': device['max_input_channels'],
-                        'sample_rate': int(device['default_samplerate'])
-                    })
-        
-        elif self._backend == "alsaaudio":
-            import alsaaudio
-            for i, pcm in enumerate(alsaaudio.pcms(alsaaudio.PCM_CAPTURE)):
-                devices.append({
-                    'index': i,
-                    'name': pcm,
-                    'channels': 1,
-                    'sample_rate': 44100
-                })
-        
-        return devices
+            self.audio_interface = "sounddevice"
+            
+            # List available devices
+            devices = sd.query_devices()
+            logger.info(f"Available audio devices:")
+            for i, dev in enumerate(devices):
+                if dev['max_input_channels'] > 0:
+                    logger.info(f"  [{i}] {dev['name']} (inputs: {dev['max_input_channels']})")
+            
+            # Use specified device or default
+            if self.device is not None:
+                sd.default.device = self.device
+            
+            logger.info(f"Audio capture ready: {self.sample_rate}Hz, {self.channels}ch")
+            return True
+            
+        except ImportError:
+            logger.warning("sounddevice not available, trying pyaudio...")
+            try:
+                import pyaudio
+                self.audio_interface = "pyaudio"
+                self.pa = pyaudio.PyAudio()
+                logger.info("Using PyAudio for capture")
+                return True
+            except ImportError:
+                logger.error("No audio library available! Install sounddevice or pyaudio")
+                return False
     
-    def start(self):
-        """Start audio capture"""
-        if self.is_running:
-            return
-        
-        self.is_running = True
-        self._thread = threading.Thread(target=self._capture_loop, daemon=True)
-        self._thread.start()
-        logger.info("Audio capture started")
+    def record_chunk(self) -> np.ndarray:
+        """Record a chunk of audio"""
+        if self.audio_interface == "sounddevice":
+            return self._record_sounddevice()
+        elif self.audio_interface == "pyaudio":
+            return self._record_pyaudio()
+        else:
+            # Fallback: generate silence (for testing)
+            logger.warning("No audio interface - returning silence")
+            return np.zeros(self.chunk_samples, dtype=np.float32)
     
-    def stop(self):
-        """Stop audio capture"""
-        self.is_running = False
-        if self._thread:
-            self._thread.join(timeout=2)
-        logger.info("Audio capture stopped")
-    
-    def _capture_loop(self):
-        """Main capture loop"""
-        import numpy as np
+    def _record_sounddevice(self) -> np.ndarray:
+        """Record using sounddevice"""
+        import sounddevice as sd
         
-        # Calculate buffer size
-        chunk_samples = int(self.config.sample_rate * 0.1)  # 100ms chunks
-        
-        if self._backend == "pyaudio":
-            self._capture_pyaudio(chunk_samples)
-        elif self._backend == "sounddevice":
-            self._capture_sounddevice(chunk_samples)
-        elif self._backend == "alsaaudio":
-            self._capture_alsa(chunk_samples)
+        logger.info(f"Recording {self.chunk_duration}s of audio...")
+        try:
+            audio = sd.rec(
+                self.chunk_samples,
+                samplerate=self.sample_rate,
+                channels=self.channels,
+                dtype='float32'
+            )
+            sd.wait()  # Wait for recording to complete
+            
+            # Convert to mono if needed
+            if len(audio.shape) > 1:
+                audio = audio.mean(axis=1)
+            
+            return audio.flatten()
+            
+        except Exception as e:
+            logger.error(f"Recording failed: {e}")
+            return np.zeros(self.chunk_samples, dtype=np.float32)
     
-    def _capture_pyaudio(self, chunk_samples: int):
-        """Capture using PyAudio"""
+    def _record_pyaudio(self) -> np.ndarray:
+        """Record using PyAudio"""
         import pyaudio
-        import numpy as np
         
-        stream = self._pa.open(
-            format=pyaudio.paInt16,
-            channels=self.config.channels,
-            rate=self.config.sample_rate,
-            input=True,
-            frames_per_buffer=chunk_samples,
-            input_device_index=self.config.device_index
-        )
+        CHUNK = 1024
+        FORMAT = pyaudio.paFloat32
         
         try:
-            while self.is_running:
-                data = stream.read(chunk_samples, exception_on_overflow=False)
-                self.callback(data)
-        finally:
+            stream = self.pa.open(
+                format=FORMAT,
+                channels=self.channels,
+                rate=self.sample_rate,
+                input=True,
+                frames_per_buffer=CHUNK
+            )
+            
+            frames = []
+            num_chunks = int(self.sample_rate / CHUNK * self.chunk_duration)
+            
+            logger.info(f"Recording {self.chunk_duration}s of audio...")
+            for _ in range(num_chunks):
+                data = stream.read(CHUNK, exception_on_overflow=False)
+                frames.append(np.frombuffer(data, dtype=np.float32))
+            
             stream.stop_stream()
             stream.close()
+            
+            return np.concatenate(frames)
+            
+        except Exception as e:
+            logger.error(f"Recording failed: {e}")
+            return np.zeros(self.chunk_samples, dtype=np.float32)
     
-    def _capture_sounddevice(self, chunk_samples: int):
-        """Capture using SoundDevice"""
-        import sounddevice as sd
-        import numpy as np
-        
-        def audio_callback(indata, frames, time_info, status):
-            if status:
-                logger.warning(f"Audio status: {status}")
-            # Convert to int16 bytes
-            audio_int16 = (indata * 32767).astype(np.int16)
-            self.callback(audio_int16.tobytes())
-        
-        with sd.InputStream(
-            samplerate=self.config.sample_rate,
-            channels=self.config.channels,
-            dtype='float32',
-            blocksize=chunk_samples,
-            device=self.config.device_index,
-            callback=audio_callback
-        ):
-            while self.is_running:
-                time.sleep(0.1)
-    
-    def _capture_alsa(self, chunk_samples: int):
-        """Capture using ALSA (Raspberry Pi)"""
-        import alsaaudio
-        import numpy as np
-        
-        # For INMP441, use the native 44100 sample rate
-        inp = alsaaudio.PCM(
-            alsaaudio.PCM_CAPTURE,
-            alsaaudio.PCM_NORMAL,
-            device='default'
-        )
-        inp.setchannels(self.config.channels)
-        inp.setrate(self.config.inmp441_sample_rate)
-        inp.setformat(alsaaudio.PCM_FORMAT_S24_LE)  # INMP441 is 24-bit
-        inp.setperiodsize(chunk_samples)
-        
-        # Resample from 44100 to 16000
-        resample_ratio = self.config.sample_rate / self.config.inmp441_sample_rate
-        
-        while self.is_running:
-            length, data = inp.read()
-            if length > 0:
-                # Convert 24-bit to 16-bit
-                audio_24 = np.frombuffer(data, dtype=np.int32)
-                audio_16 = (audio_24 >> 8).astype(np.int16)
-                
-                # Resample
-                if resample_ratio != 1.0:
-                    from scipy.signal import resample
-                    audio_16 = resample(audio_16, int(len(audio_16) * resample_ratio)).astype(np.int16)
-                
-                self.callback(audio_16.tobytes())
+    def cleanup(self):
+        """Cleanup resources"""
+        if hasattr(self, 'pa'):
+            self.pa.terminate()
 
 
-# ==============================================================================
-# Display Manager
-# ==============================================================================
-
-class DisplayManager:
-    """Manages OLED/LCD display for status information"""
+class AudioPreprocessor:
+    """
+    Basic audio preprocessing on RPi5.
+    Keeps it lightweight - heavy processing on laptop.
+    """
     
-    def __init__(self, config: HardwareConfig):
-        self.config = config
-        self._display = None
-        self._draw = None
-        self._font = None
+    def __init__(self, sample_rate=16000):
+        self.sample_rate = sample_rate
+    
+    def preprocess(self, waveform: np.ndarray) -> np.ndarray:
+        """
+        Basic preprocessing:
+        - Normalize amplitude
+        - Remove DC offset
+        - Trim silence (basic)
+        """
+        # Remove DC offset
+        waveform = waveform - np.mean(waveform)
         
-        if config.display_enabled:
-            self._init_display()
+        # Normalize to [-1, 1]
+        max_val = np.max(np.abs(waveform))
+        if max_val > 0:
+            waveform = waveform / max_val
+        
+        # Basic silence trimming (remove leading/trailing near-silence)
+        threshold = 0.01
+        non_silent = np.where(np.abs(waveform) > threshold)[0]
+        
+        if len(non_silent) > 0:
+            start = max(0, non_silent[0] - int(0.1 * self.sample_rate))
+            end = min(len(waveform), non_silent[-1] + int(0.1 * self.sample_rate))
+            waveform = waveform[start:end]
+        
+        return waveform.astype(np.float32)
     
-    def _init_display(self):
-        """Initialize display hardware"""
+    def to_wav_bytes(self, waveform: np.ndarray) -> bytes:
+        """Convert waveform to WAV file bytes for sending"""
+        # Scale to int16
+        audio_int16 = (waveform * 32767).astype(np.int16)
+        
+        buffer = io.BytesIO()
+        with wave.open(buffer, 'wb') as wav_file:
+            wav_file.setnchannels(1)
+            wav_file.setsampwidth(2)  # 16-bit
+            wav_file.setframerate(self.sample_rate)
+            wav_file.writeframes(audio_int16.tobytes())
+        
+        return buffer.getvalue()
+    
+    def get_basic_features(self, waveform: np.ndarray) -> dict:
+        """Extract basic features on RPi5 (lightweight)"""
+        return {
+            "duration_seconds": len(waveform) / self.sample_rate,
+            "rms_energy": float(np.sqrt(np.mean(waveform**2))),
+            "max_amplitude": float(np.max(np.abs(waveform))),
+            "zero_crossings": int(np.sum(np.abs(np.diff(np.sign(waveform))) > 0)),
+        }
+
+
+class LaptopClient:
+    """
+    Sends audio to laptop for AI processing.
+    """
+    
+    def __init__(self, server_url: str, api_key: str = ""):
+        self.server_url = server_url.rstrip('/')
+        self.api_key = api_key
+        self.session = None
+    
+    async def initialize(self):
+        """Initialize HTTP client"""
+        try:
+            import aiohttp
+            self.session = aiohttp.ClientSession()
+            
+            # Test connection
+            async with self.session.get(f"{self.server_url}/health") as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    logger.info(f"Connected to laptop server: {data.get('status')}")
+                    return True
+                else:
+                    logger.error(f"Server returned status {resp.status}")
+                    return False
+                    
+        except Exception as e:
+            logger.error(f"Failed to connect to laptop: {e}")
+            logger.info(f"Make sure server is running on {self.server_url}")
+            return False
+    
+    async def analyze_audio(self, wav_bytes: bytes, basic_features: dict) -> dict:
+        """
+        Send audio to laptop for AI analysis.
+        
+        Args:
+            wav_bytes: WAV file as bytes
+            basic_features: Basic features computed on RPi5
+        
+        Returns:
+            Analysis result from laptop
+        """
+        if self.session is None:
+            return {"error": "Not connected to server"}
+        
+        try:
+            import aiohttp
+            
+            # Create form data with audio file
+            form = aiohttp.FormData()
+            form.add_field(
+                'audio',
+                wav_bytes,
+                filename='recording.wav',
+                content_type='audio/wav'
+            )
+            
+            # Add headers
+            headers = {}
+            if self.api_key:
+                headers['X-API-Key'] = self.api_key
+            
+            # Send to laptop
+            url = f"{self.server_url}/api/v1/analyze"
+            async with self.session.post(url, data=form, headers=headers) as resp:
+                if resp.status == 200:
+                    result = await resp.json()
+                    return result
+                else:
+                    error_text = await resp.text()
+                    logger.error(f"Analysis failed: {resp.status} - {error_text}")
+                    return {"error": f"Server error: {resp.status}"}
+                    
+        except Exception as e:
+            logger.error(f"Failed to send audio: {e}")
+            return {"error": str(e)}
+    
+    async def cleanup(self):
+        """Cleanup HTTP client"""
+        if self.session:
+            await self.session.close()
+
+
+class ResultDisplay:
+    """
+    Display results on console (and optionally OLED/LEDs)
+    """
+    
+    def __init__(self, use_display=False, use_leds=False):
+        self.use_display = use_display
+        self.use_leds = use_leds
+        self.oled = None
+        
+        if use_display:
+            self._init_oled()
+        if use_leds:
+            self._init_leds()
+    
+    def _init_oled(self):
+        """Initialize OLED display"""
+        try:
+            from luma.core.interface.serial import i2c
+            from luma.oled.device import ssd1306
+            
+            serial = i2c(port=1, address=0x3C)
+            self.oled = ssd1306(serial)
+            logger.info("OLED display initialized")
+        except Exception as e:
+            logger.warning(f"OLED not available: {e}")
+            self.use_display = False
+    
+    def _init_leds(self):
+        """Initialize LED indicators"""
+        try:
+            import RPi.GPIO as GPIO
+            
+            self.LED_GREEN = 17
+            self.LED_YELLOW = 27
+            self.LED_RED = 22
+            
+            GPIO.setmode(GPIO.BCM)
+            GPIO.setup([self.LED_GREEN, self.LED_YELLOW, self.LED_RED], GPIO.OUT)
+            GPIO.output([self.LED_GREEN, self.LED_YELLOW, self.LED_RED], GPIO.LOW)
+            
+            logger.info("LED indicators initialized")
+        except Exception as e:
+            logger.warning(f"LEDs not available: {e}")
+            self.use_leds = False
+    
+    def show_result(self, result: dict):
+        """Display analysis result"""
+        if "error" in result:
+            self._show_error(result["error"])
+            return
+        
+        # Extract info
+        diagnosis = result.get("diagnosis", {})
+        classification = diagnosis.get("primary_classification", "Unknown")
+        confidence = diagnosis.get("confidence", 0) * 100
+        risk_level = diagnosis.get("risk_level", "YELLOW")
+        
+        # Console output
+        print("\n" + "=" * 50)
+        print(f"  BABY CRY ANALYSIS RESULT")
+        print("=" * 50)
+        print(f"  Classification: {classification.upper()}")
+        print(f"  Confidence: {confidence:.1f}%")
+        print(f"  Risk Level: {risk_level}")
+        print("=" * 50)
+        
+        # Recommendations
+        recommendations = diagnosis.get("recommendations", [])
+        if recommendations:
+            print("\n  Recommendations:")
+            for rec in recommendations[:3]:
+                print(f"    - {rec}")
+        print()
+        
+        # OLED display
+        if self.use_display and self.oled:
+            self._update_oled(classification, confidence, risk_level)
+        
+        # LED indicators
+        if self.use_leds:
+            self._update_leds(risk_level)
+    
+    def _show_error(self, error: str):
+        """Display error"""
+        print(f"\n[ERROR] {error}\n")
+        if self.use_leds:
+            self._blink_all_leds()
+    
+    def _update_oled(self, classification: str, confidence: float, risk_level: str):
+        """Update OLED display"""
         try:
             from PIL import Image, ImageDraw, ImageFont
             
-            if self.config.display_type == "ssd1306":
-                from luma.core.interface.serial import i2c
-                from luma.oled.device import ssd1306
-                
-                serial = i2c(port=1, address=self.config.display_i2c_address)
-                self._display = ssd1306(serial, width=self.config.display_width, height=self.config.display_height)
+            image = Image.new('1', (self.oled.width, self.oled.height))
+            draw = ImageDraw.Draw(image)
             
-            # Load font
+            # Try to load font
             try:
-                self._font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 10)
+                font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 12)
+                font_small = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 10)
             except:
-                self._font = ImageFont.load_default()
+                font = ImageFont.load_default()
+                font_small = font
             
-            logger.info(f"Display initialized: {self.config.display_type}")
+            draw.text((0, 0), "Baby Cry Monitor", font=font_small, fill=255)
+            draw.text((0, 16), f"{classification.upper()}", font=font, fill=255)
+            draw.text((0, 32), f"Conf: {confidence:.0f}%", font=font_small, fill=255)
+            draw.text((0, 48), f"Risk: {risk_level}", font=font_small, fill=255)
             
-        except ImportError as e:
-            logger.warning(f"Display not available: {e}")
-            logger.warning("Install with: pip install luma.oled pillow")
+            self.oled.display(image)
         except Exception as e:
-            logger.error(f"Display init error: {e}")
+            logger.warning(f"OLED update failed: {e}")
     
-    def show_status(self, status: str, risk_level: str = "GREEN", confidence: float = 0.0):
-        """Display current status on screen"""
-        if not self._display:
-            return
-        
-        try:
-            from PIL import Image, ImageDraw
-            
-            img = Image.new('1', (self.config.display_width, self.config.display_height), 0)
-            draw = ImageDraw.Draw(img)
-            
-            # Title
-            draw.text((0, 0), "Baby Monitor", font=self._font, fill=1)
-            draw.line([(0, 12), (self.config.display_width, 12)], fill=1)
-            
-            # Status
-            draw.text((0, 16), f"Status: {status}", font=self._font, fill=1)
-            
-            # Risk level with indicator
-            risk_color = {"GREEN": "OK", "YELLOW": "WARN", "RED": "ALERT"}.get(risk_level, "?")
-            draw.text((0, 28), f"Risk: {risk_color}", font=self._font, fill=1)
-            
-            # Confidence
-            draw.text((0, 40), f"Conf: {confidence:.1%}", font=self._font, fill=1)
-            
-            # Timestamp
-            timestamp = datetime.now().strftime("%H:%M:%S")
-            draw.text((0, 52), timestamp, font=self._font, fill=1)
-            
-            self._display.display(img)
-            
-        except Exception as e:
-            logger.error(f"Display update error: {e}")
-    
-    def show_connecting(self):
-        """Show connecting status"""
-        self.show_status("Connecting...", "GREEN", 0.0)
-    
-    def show_error(self, message: str):
-        """Show error message"""
-        if not self._display:
-            return
-        
-        try:
-            from PIL import Image, ImageDraw
-            
-            img = Image.new('1', (self.config.display_width, self.config.display_height), 0)
-            draw = ImageDraw.Draw(img)
-            
-            draw.text((0, 0), "ERROR", font=self._font, fill=1)
-            draw.line([(0, 12), (self.config.display_width, 12)], fill=1)
-            draw.text((0, 20), message[:20], font=self._font, fill=1)
-            
-            self._display.display(img)
-            
-        except Exception as e:
-            logger.error(f"Display error: {e}")
-    
-    def clear(self):
-        """Clear display"""
-        if self._display:
-            try:
-                self._display.clear()
-            except Exception as e:
-                logger.error(f"Display clear error: {e}")
-
-
-# ==============================================================================
-# LED Status
-# ==============================================================================
-
-class LEDStatus:
-    """Manages status LEDs (Green/Yellow/Red)"""
-    
-    def __init__(self, config: HardwareConfig):
-        self.config = config
-        self._gpio_available = False
-        
-        if config.led_enabled:
-            self._init_gpio()
-    
-    def _init_gpio(self):
-        """Initialize GPIO for LEDs"""
+    def _update_leds(self, risk_level: str):
+        """Update LED indicators based on risk"""
         try:
             import RPi.GPIO as GPIO
             
-            GPIO.setmode(GPIO.BCM)
-            GPIO.setwarnings(False)
-            
-            GPIO.setup(self.config.led_gpio_green, GPIO.OUT)
-            GPIO.setup(self.config.led_gpio_yellow, GPIO.OUT)
-            GPIO.setup(self.config.led_gpio_red, GPIO.OUT)
-            
-            self._gpio_available = True
-            self.set_status("GREEN")
-            
-            logger.info("GPIO LEDs initialized")
-            
-        except ImportError:
-            logger.warning("RPi.GPIO not available (not running on Pi?)")
-        except Exception as e:
-            logger.error(f"GPIO init error: {e}")
-    
-    def set_status(self, level: str):
-        """Set LED status (GREEN, YELLOW, RED)"""
-        if not self._gpio_available:
-            return
-        
-        try:
-            import RPi.GPIO as GPIO
-            
-            # Turn off all LEDs first
-            GPIO.output(self.config.led_gpio_green, GPIO.LOW)
-            GPIO.output(self.config.led_gpio_yellow, GPIO.LOW)
-            GPIO.output(self.config.led_gpio_red, GPIO.LOW)
+            # Turn all off
+            GPIO.output([self.LED_GREEN, self.LED_YELLOW, self.LED_RED], GPIO.LOW)
             
             # Turn on appropriate LED
-            if level == "GREEN":
-                GPIO.output(self.config.led_gpio_green, GPIO.HIGH)
-            elif level == "YELLOW":
-                GPIO.output(self.config.led_gpio_yellow, GPIO.HIGH)
-            elif level == "RED":
-                GPIO.output(self.config.led_gpio_red, GPIO.HIGH)
-                
-        except Exception as e:
-            logger.error(f"LED set error: {e}")
+            if risk_level == "GREEN":
+                GPIO.output(self.LED_GREEN, GPIO.HIGH)
+            elif risk_level == "YELLOW":
+                GPIO.output(self.LED_YELLOW, GPIO.HIGH)
+            elif risk_level == "RED":
+                GPIO.output(self.LED_RED, GPIO.HIGH)
+        except:
+            pass
     
-    def cleanup(self):
-        """Cleanup GPIO"""
-        if self._gpio_available:
-            try:
-                import RPi.GPIO as GPIO
-                GPIO.cleanup()
-            except:
-                pass
-
-
-# ==============================================================================
-# Speaker/Buzzer
-# ==============================================================================
-
-class SpeakerAlert:
-    """Manages audio alerts via speaker/buzzer"""
-    
-    def __init__(self, config: HardwareConfig):
-        self.config = config
-        self._gpio_available = False
-        self._pwm = None
-        
-        if config.speaker_enabled:
-            self._init_gpio()
-    
-    def _init_gpio(self):
-        """Initialize GPIO for speaker/buzzer"""
+    def _blink_all_leds(self):
+        """Blink all LEDs for error indication"""
         try:
             import RPi.GPIO as GPIO
-            
-            GPIO.setmode(GPIO.BCM)
-            GPIO.setup(self.config.speaker_gpio, GPIO.OUT)
-            self._pwm = GPIO.PWM(self.config.speaker_gpio, 1000)
-            self._gpio_available = True
-            
-            logger.info("Speaker GPIO initialized")
-            
-        except ImportError:
-            logger.warning("RPi.GPIO not available")
-        except Exception as e:
-            logger.error(f"Speaker init error: {e}")
+            for _ in range(3):
+                GPIO.output([self.LED_GREEN, self.LED_YELLOW, self.LED_RED], GPIO.HIGH)
+                time.sleep(0.2)
+                GPIO.output([self.LED_GREEN, self.LED_YELLOW, self.LED_RED], GPIO.LOW)
+                time.sleep(0.2)
+        except:
+            pass
     
-    def alert(self, level: str, duration: float = 0.5):
-        """Play alert based on risk level"""
-        if not self._gpio_available or not self._pwm:
-            return
-        
-        try:
-            if level == "RED":
-                # Urgent: 3 short beeps
-                for _ in range(3):
-                    self._pwm.start(50)
-                    self._pwm.ChangeFrequency(1500)
-                    time.sleep(0.15)
-                    self._pwm.stop()
-                    time.sleep(0.1)
-            
-            elif level == "YELLOW":
-                # Warning: 2 medium beeps
-                for _ in range(2):
-                    self._pwm.start(50)
-                    self._pwm.ChangeFrequency(1000)
-                    time.sleep(0.2)
-                    self._pwm.stop()
-                    time.sleep(0.15)
-            
-            elif level == "GREEN":
-                # OK: 1 short low beep
-                self._pwm.start(30)
-                self._pwm.ChangeFrequency(500)
-                time.sleep(0.1)
-                self._pwm.stop()
-                
-        except Exception as e:
-            logger.error(f"Speaker alert error: {e}")
+    def show_recording(self):
+        """Indicate recording in progress"""
+        print("  [Recording...]", end='\r')
     
-    def cleanup(self):
-        """Cleanup PWM"""
-        if self._pwm:
-            try:
-                self._pwm.stop()
-            except:
-                pass
+    def show_processing(self):
+        """Indicate processing"""
+        print("  [Sending to laptop for AI analysis...]", end='\r')
 
 
-# ==============================================================================
-# Cloud Client
-# ==============================================================================
-
-class CloudClient:
-    """WebSocket client for cloud API communication"""
+async def main_loop(config: dict):
+    """Main capture and analysis loop"""
     
-    def __init__(self, config: CloudConfig, on_result: Callable[[Dict], None]):
-        self.config = config
-        self.on_result = on_result
-        self._ws = None
-        self._connected = False
-        self._reconnect_task = None
-        self._ping_task = None
-        self._message_queue: Queue = Queue()
-        self._offline_buffer: deque = deque(maxlen=100)
+    # Initialize components
+    audio = AudioCapture(
+        sample_rate=config["sample_rate"],
+        channels=config["channels"],
+        chunk_duration=config["chunk_duration"],
+        device=config.get("recording_device")
+    )
     
-    @property
-    def is_connected(self) -> bool:
-        return self._connected
+    if not audio.initialize():
+        logger.error("Failed to initialize audio capture")
+        return
     
-    async def connect(self):
-        """Connect to cloud WebSocket"""
-        import websockets
-        
+    preprocessor = AudioPreprocessor(sample_rate=config["sample_rate"])
+    
+    client = LaptopClient(
+        server_url=config["server_url"],
+        api_key=config.get("api_key", "")
+    )
+    
+    if not await client.initialize():
+        logger.error("Failed to connect to laptop server")
+        logger.info(f"Check that server is running on {config['server_url']}")
+        return
+    
+    display = ResultDisplay(
+        use_display=config.get("display_enabled", False),
+        use_leds=config.get("led_enabled", False)
+    )
+    
+    # Create recordings directory
+    if config.get("save_recordings"):
+        recordings_dir = Path(config.get("recordings_dir", "recordings"))
+        recordings_dir.mkdir(exist_ok=True)
+    
+    logger.info("=" * 50)
+    logger.info("Baby Cry Monitor - RPi5 Client")
+    logger.info(f"Sending audio to: {config['server_url']}")
+    logger.info("Press Ctrl+C to stop")
+    logger.info("=" * 50)
+    
+    try:
         while True:
-            try:
-                logger.info(f"Connecting to {self.config.ws_url}...")
-                
-                self._ws = await asyncio.wait_for(
-                    websockets.connect(
-                        self.config.ws_url,
-                        ping_interval=self.config.ping_interval,
-                        ping_timeout=10
-                    ),
-                    timeout=self.config.connection_timeout
-                )
-                
-                self._connected = True
-                logger.info("Connected to cloud API")
-                
-                # Send any buffered messages
-                await self._flush_offline_buffer()
-                
-                # Start receiver
-                await self._receive_loop()
-                
-            except asyncio.TimeoutError:
-                logger.warning("Connection timeout, retrying...")
-            except Exception as e:
-                logger.error(f"Connection error: {e}")
+            # Record audio chunk
+            display.show_recording()
+            waveform = audio.record_chunk()
             
-            self._connected = False
-            logger.info(f"Reconnecting in {self.config.reconnect_interval}s...")
-            await asyncio.sleep(self.config.reconnect_interval)
-    
-    async def _receive_loop(self):
-        """Receive messages from cloud"""
-        try:
-            async for message in self._ws:
-                try:
-                    data = json.loads(message)
-                    self.on_result(data)
-                except json.JSONDecodeError:
-                    logger.warning(f"Invalid JSON: {message[:100]}")
-        except Exception as e:
-            logger.error(f"Receive error: {e}")
-    
-    async def send_audio(self, audio_data: bytes):
-        """Send audio data to cloud"""
-        if self._connected and self._ws:
-            try:
-                await self._ws.send(audio_data)
-            except Exception as e:
-                logger.error(f"Send error: {e}")
-                self._connected = False
-                self._offline_buffer.append(audio_data)
-        else:
-            # Buffer for later
-            self._offline_buffer.append(audio_data)
-    
-    async def _flush_offline_buffer(self):
-        """Send buffered messages after reconnection"""
-        while self._offline_buffer and self._connected:
-            try:
-                data = self._offline_buffer.popleft()
-                await self._ws.send(data)
-                await asyncio.sleep(0.05)  # Small delay between sends
-            except Exception as e:
-                logger.error(f"Buffer flush error: {e}")
-                break
-    
-    async def disconnect(self):
-        """Disconnect from cloud"""
-        self._connected = False
-        if self._ws:
-            await self._ws.close()
-
-
-# ==============================================================================
-# Main Application
-# ==============================================================================
-
-class BabyCryMonitor:
-    """Main application orchestrator"""
-    
-    def __init__(self, config: ClientConfig):
-        self.config = config
-        
-        # Audio queue for sending to cloud
-        self._audio_queue: asyncio.Queue = asyncio.Queue()
-        
-        # Initialize components
-        self.display = DisplayManager(config.hardware)
-        self.leds = LEDStatus(config.hardware)
-        self.speaker = SpeakerAlert(config.hardware)
-        self.cloud = CloudClient(config.cloud, self._on_result)
-        self.audio = AudioCapture(config.audio, self._on_audio)
-        
-        # State
-        self._running = False
-        self._last_result: Optional[Dict] = None
-        self._last_alert_time = 0
-    
-    def _on_audio(self, audio_data: bytes):
-        """Callback for audio data from capture"""
-        try:
-            self._audio_queue.put_nowait(audio_data)
-        except asyncio.QueueFull:
-            pass  # Drop oldest data
-    
-    def _on_result(self, result: Dict):
-        """Callback for results from cloud"""
-        try:
-            if result.get("type") == "analysis":
-                classification = result.get("classification", "unknown")
-                confidence = result.get("confidence", 0.0)
-                risk_level = result.get("risk_level", "GREEN")
-                
-                logger.info(f"Result: {classification} ({risk_level}) {confidence:.1%}")
-                
-                # Update display
-                self.display.show_status(classification, risk_level, confidence)
-                
-                # Update LEDs
-                self.leds.set_status(risk_level)
-                
-                # Play alert (with rate limiting)
-                current_time = time.time()
-                if risk_level in ["RED", "YELLOW"] and current_time - self._last_alert_time > 10:
-                    self.speaker.alert(risk_level)
-                    self._last_alert_time = current_time
-                
-                self._last_result = result
+            # Basic preprocessing on RPi5
+            waveform = preprocessor.preprocess(waveform)
             
-            elif result.get("type") == "pong":
-                pass  # Ping response
+            # Get basic features (computed locally)
+            basic_features = preprocessor.get_basic_features(waveform)
             
-            elif result.get("type") == "error":
-                logger.error(f"Cloud error: {result.get('message')}")
-                self.display.show_error(result.get("message", "Unknown")[:20])
-                
-        except Exception as e:
-            logger.error(f"Result handling error: {e}")
-    
-    async def _audio_sender(self):
-        """Send audio data to cloud"""
-        buffer = b""
-        buffer_size = int(self.config.audio.sample_rate * self.config.audio.buffer_duration * 2)  # int16 = 2 bytes
-        
-        while self._running:
-            try:
-                # Get audio chunk with timeout
-                chunk = await asyncio.wait_for(self._audio_queue.get(), timeout=1.0)
-                buffer += chunk
-                
-                # Send when buffer is full
-                if len(buffer) >= buffer_size:
-                    await self.cloud.send_audio(buffer[:buffer_size])
-                    buffer = buffer[buffer_size:]
-                    
-            except asyncio.TimeoutError:
+            # Check if there's actual audio (not silence)
+            if basic_features["rms_energy"] < 0.01:
+                logger.info("  [Silence detected - skipping]")
+                await asyncio.sleep(1)
                 continue
-            except Exception as e:
-                logger.error(f"Audio sender error: {e}")
+            
+            # Convert to WAV bytes
+            wav_bytes = preprocessor.to_wav_bytes(waveform)
+            
+            # Save recording if enabled
+            if config.get("save_recordings"):
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                save_path = recordings_dir / f"recording_{timestamp}.wav"
+                with open(save_path, 'wb') as f:
+                    f.write(wav_bytes)
+            
+            # Send to laptop for AI analysis
+            display.show_processing()
+            result = await client.analyze_audio(wav_bytes, basic_features)
+            
+            # Display result
+            display.show_result(result)
+            
+            # Brief pause before next recording
+            await asyncio.sleep(0.5)
+            
+    except KeyboardInterrupt:
+        logger.info("\nStopping...")
+    finally:
+        audio.cleanup()
+        await client.cleanup()
+
+
+def load_config(config_path: str = None) -> dict:
+    """Load configuration from file or use defaults"""
+    config = DEFAULT_CONFIG.copy()
     
-    async def run(self):
-        """Run the monitor"""
-        logger.info("=" * 60)
-        logger.info("BABY CRY MONITOR - RPi5 Client")
-        logger.info(f"Cloud API: {self.config.cloud.ws_url}")
-        logger.info("=" * 60)
-        
-        self._running = True
-        
-        # Show connecting status
-        self.display.show_connecting()
-        self.leds.set_status("YELLOW")
-        
-        # Start audio capture
-        self.audio.start()
-        
+    if config_path and Path(config_path).exists():
         try:
-            # Run cloud connection and audio sender concurrently
-            await asyncio.gather(
-                self.cloud.connect(),
-                self._audio_sender()
-            )
-        except KeyboardInterrupt:
-            logger.info("Shutting down...")
+            with open(config_path) as f:
+                user_config = json.load(f)
+                config.update(user_config)
+            logger.info(f"Loaded config from {config_path}")
         except Exception as e:
-            logger.error(f"Runtime error: {e}")
-        finally:
-            self._running = False
-            self.audio.stop()
-            await self.cloud.disconnect()
-            self.display.clear()
-            self.leds.cleanup()
-            self.speaker.cleanup()
+            logger.warning(f"Failed to load config: {e}")
     
-    def run_sync(self):
-        """Synchronous entry point"""
-        asyncio.run(self.run())
-
-
-# ==============================================================================
-# CLI Interface
-# ==============================================================================
-
-def main():
-    """Main entry point"""
-    import argparse
-    
-    parser = argparse.ArgumentParser(description="Baby Cry Monitor - RPi5 Client")
-    parser.add_argument("--config", "-c", default="config.json", help="Config file path")
-    parser.add_argument("--server", "-s", help="Cloud WebSocket URL")
-    parser.add_argument("--list-devices", action="store_true", help="List audio devices")
-    parser.add_argument("--device", "-d", type=int, help="Audio device index")
-    parser.add_argument("--generate-config", action="store_true", help="Generate default config file")
-    args = parser.parse_args()
-    
-    # Generate config
-    if args.generate_config:
-        config = ClientConfig()
-        config.save(args.config)
-        print(f"Config saved to {args.config}")
-        return
-    
-    # Load config
-    config = ClientConfig.from_file(args.config)
-    
-    # Override from CLI
-    if args.server:
-        config.cloud.ws_url = args.server
-    if args.device is not None:
-        config.audio.device_index = args.device
-    
-    # List devices
-    if args.list_devices:
-        audio = AudioCapture(config.audio, lambda x: None)
-        devices = audio.list_devices()
-        print("\nAvailable Audio Devices:")
-        print("-" * 50)
-        for d in devices:
-            print(f"  [{d['index']}] {d['name']}")
-            print(f"      Channels: {d['channels']}, Rate: {d['sample_rate']}")
-        return
-    
-    # Run monitor
-    monitor = BabyCryMonitor(config)
-    monitor.run_sync()
+    return config
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Baby Cry Monitor - RPi5 Client")
+    parser.add_argument("--config", type=str, default="config.json", help="Config file path")
+    parser.add_argument("--server", type=str, help="Laptop server URL (overrides config)")
+    parser.add_argument("--duration", type=float, help="Recording chunk duration in seconds")
+    args = parser.parse_args()
+    
+    # Load configuration
+    config = load_config(args.config)
+    
+    # Override with command line args
+    if args.server:
+        config["server_url"] = args.server
+    if args.duration:
+        config["chunk_duration"] = args.duration
+    
+    # Run main loop
+    asyncio.run(main_loop(config))

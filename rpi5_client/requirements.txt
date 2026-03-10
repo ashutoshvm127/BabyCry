@@ -1,28 +1,39 @@
 # ==============================================================================
-# Baby Cry Monitor - Raspberry Pi 5 Client Dependencies
+# Baby Cry Monitor - Raspberry Pi 5 Lightweight Client
 # ==============================================================================
+# This client only captures audio and sends it to the laptop for AI processing
 
-# Audio Capture
-pyaudio>=0.2.13
-sounddevice>=0.4.6
+# Audio Capture (install one of these)
+sounddevice>=0.4.6  # Preferred - easier to install
+# pyaudio>=0.2.13   # Alternative - requires portaudio
 
-# WebSocket Communication
-websockets>=12.0
-aiofiles>=23.2.0
+# HTTP Communication
+aiohttp>=3.9.0
 
 # Signal Processing
 numpy>=1.24.0
-scipy>=1.11.0
 
-# Display (OLED/LCD)
+# Display (OLED) - Optional
 pillow>=10.0.0
 luma.oled>=3.12.0
 luma.core>=2.4.0
 
-# GPIO (Raspberry Pi)
-# RPi.GPIO>=0.7.1  # Install via apt: python3-rpi.gpio
-# smbus2>=0.4.2    # Install via apt: python3-smbus
+# GPIO (Raspberry Pi) - Optional, install via apt if needed
+# sudo apt install python3-rpi.gpio python3-smbus
 
-# Utilities
-requests>=2.31.0
-python-dotenv>=1.0.0
+# ==============================================================================
+# Installation on Raspberry Pi 5:
+# ==============================================================================
+# 1. Create virtual environment:
+#    python3 -m venv venv
+#    source venv/bin/activate
+#
+# 2. Install portaudio (for audio):
+#    sudo apt install libportaudio2 portaudio19-dev
+#
+# 3. Install requirements:
+#    pip install -r requirements.txt
+#
+# 4. Run the client:
+#    python main.py --server http://YOUR_LAPTOP_IP:8080
+# ==============================================================================
