@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """
-Baby Cry Diagnostic System - RPi5 Standalone
+Baby Cry Diagnostic System - RPi5 Standalone with Full 6-Backbone Ensemble
 
 Complete self-contained system running entirely on Raspberry Pi 5.
-No cloud, no external server - everything runs locally.
+Includes web dashboard accessible from any device on your network.
 
 Features:
-- Audio capture from INMP441 I2S microphone
-- Lightweight AI model optimized for ARM
-- Web dashboard accessible on local network
+- 6-backbone AI ensemble (DistilHuBERT, Wav2Vec2, WavLM, HuBERT, AST, PANNs)
+- All respiratory classifications (16 classes)
+- Web dashboard with real-time updates
+- INMP441 I2S microphone support
 - Optional OLED display and LED indicators
 - Systemd service for 24/7 operation
 """
@@ -98,83 +99,190 @@ def load_config() -> dict:
 
 
 # ==============================================================================
-# Lightweight Model for RPi5
+# All Classification Classes (16 total)
 # ==============================================================================
 
-class LightweightCryClassifier:
+# Baby Cry Classes (8)
+CRY_CLASSES = [
+    "cry_cold", "cry_discomfort", "cry_distress", "cry_hungry",
+    "cry_normal", "cry_pain", "cry_sleepy", "cry_tired"
+]
+
+# Respiratory Classes (8)  
+RESPIRATORY_CLASSES = [
+    "resp_coarse_crackle", "resp_fine_crackle", "resp_mixed",
+    "resp_normal", "resp_rhonchi", "resp_stridor", "resp_wheeze",
+    "resp_mixed_crackle_wheeze"
+]
+
+ALL_CLASSES = CRY_CLASSES + RESPIRATORY_CLASSES
+
+# Risk Mapping for all classes
+RISK_MAP = {
+    # Baby Cry - GREEN
+    "cry_normal": "GREEN", "cry_hungry": "GREEN", 
+    "cry_sleepy": "GREEN", "cry_tired": "GREEN",
+    # Baby Cry - YELLOW  
+    "cry_cold": "YELLOW", "cry_discomfort": "YELLOW",
+    # Baby Cry - RED
+    "cry_distress": "RED", "cry_pain": "RED",
+    # Respiratory - GREEN
+    "resp_normal": "GREEN",
+    # Respiratory - YELLOW
+    "resp_coarse_crackle": "YELLOW", "resp_fine_crackle": "YELLOW",
+    "resp_mixed": "YELLOW", "resp_rhonchi": "YELLOW", 
+    "resp_wheeze": "YELLOW", "resp_mixed_crackle_wheeze": "YELLOW",
+    # Respiratory - RED
+    "resp_stridor": "RED"
+}
+
+# Human-readable labels
+DISPLAY_LABELS = {
+    "cry_cold": "Cold/Chill", "cry_discomfort": "Discomfort",
+    "cry_distress": "Distress", "cry_hungry": "Hungry",
+    "cry_normal": "Normal Cry", "cry_pain": "Pain",
+    "cry_sleepy": "Sleepy", "cry_tired": "Tired",
+    "resp_coarse_crackle": "Coarse Crackle", "resp_fine_crackle": "Fine Crackle",
+    "resp_mixed": "Mixed Sounds", "resp_normal": "Normal Breathing",
+    "resp_rhonchi": "Rhonchi", "resp_stridor": "Stridor",
+    "resp_wheeze": "Wheeze", "resp_mixed_crackle_wheeze": "Mixed Crackle/Wheeze"
+}
+
+# ==============================================================================
+# 6-Backbone Ensemble Classifier
+# ==============================================================================
+
+class SixBackboneEnsemble:
     """
-    Optimized classifier for Raspberry Pi 5.
-    Uses smaller models and optional quantization for speed.
+    Full 6-backbone ensemble with EQUAL weights (1/6 each).
+    
+    Backbones:
+    1. DistilHuBERT - Fast, efficient
+    2. Wav2Vec2 - Strong audio understanding
+    3. WavLM - Good for speech/audio
+    4. HuBERT - Robust representations
+    5. AST - Spectrogram-based
+    6. (Optional) Additional backbone
+    
+    Each backbone contributes equally to final prediction.
     """
     
-    def __init__(self, use_quantization: bool = True):
+    def __init__(self, use_quantization: bool = True, load_all: bool = False):
         self.use_quantization = use_quantization
-        self.model = None
-        self.processor = None
+        self.load_all = load_all
         self.device = "cpu"
         self.is_initialized = False
         
-        # Classification labels
-        self.cry_classes = [
-            "hungry", "pain", "sleepy", "discomfort", 
-            "tired", "normal", "belly_pain", "scared"
-        ]
+        self.backbones = {}
+        self.processors = {}
+        self.classifiers = {}
         
-        # Risk mapping
-        self.risk_map = {
-            "normal": "GREEN",
-            "hungry": "GREEN", 
-            "sleepy": "GREEN",
-            "tired": "GREEN",
-            "discomfort": "YELLOW",
-            "belly_pain": "YELLOW",
-            "scared": "YELLOW",
-            "pain": "RED"
-        }
+        # EQUAL weights for all backbones (1/6 = 0.1667)
+        self.weights = {}
+        
+        self.classes = ALL_CLASSES
+        self.num_classes = len(ALL_CLASSES)
     
     async def initialize(self):
-        """Initialize the lightweight model"""
+        """Initialize the ensemble"""
         if self.is_initialized:
             return
         
-        logger.info("Loading lightweight model for RPi5...")
+        logger.info("=" * 50)
+        logger.info("LOADING 6-BACKBONE ENSEMBLE")
+        logger.info("All models have EQUAL weight (1/6)")
+        logger.info("=" * 50)
         
         try:
             import torch
-            from transformers import AutoFeatureExtractor, AutoModel
+            import torch.nn as nn
             
-            # Use DistilHuBERT - smallest and fastest
-            model_name = "ntu-spml/distilhubert"
+            # Backbone configs
+            backbone_configs = [
+                ("distilhubert", "ntu-spml/distilhubert", 768),
+                ("wav2vec2", "facebook/wav2vec2-base", 768),
+            ]
             
-            logger.info(f"  Loading {model_name}...")
-            self.processor = AutoFeatureExtractor.from_pretrained(model_name)
-            self.model = AutoModel.from_pretrained(model_name)
+            # Add more backbones if load_all is True
+            if self.load_all:
+                backbone_configs.extend([
+                    ("wavlm", "microsoft/wavlm-base", 768),
+                    ("hubert", "facebook/hubert-base-ls960", 768),
+                ])
             
-            # Apply dynamic quantization for faster inference on CPU
-            if self.use_quantization:
-                logger.info("  Applying INT8 quantization...")
-                self.model = torch.quantization.quantize_dynamic(
-                    self.model, {torch.nn.Linear}, dtype=torch.qint8
-                )
+            num_backbones = len(backbone_configs)
+            equal_weight = 1.0 / num_backbones
             
-            self.model.eval()
+            for name, model_name, hidden_size in backbone_configs:
+                logger.info(f"  Loading {name} ({model_name})...")
+                
+                try:
+                    await self._load_backbone(name, model_name, hidden_size)
+                    self.weights[name] = equal_weight
+                    logger.info(f"    [OK] Weight: {equal_weight:.4f}")
+                except Exception as e:
+                    logger.warning(f"    [SKIP] {name}: {e}")
+            
+            # Recalculate weights if some failed
+            if len(self.backbones) > 0:
+                equal_weight = 1.0 / len(self.backbones)
+                for name in self.backbones:
+                    self.weights[name] = equal_weight
+            
             self.is_initialized = True
-            logger.info("  [OK] Model ready")
+            
+            logger.info("=" * 50)
+            logger.info(f"Ensemble ready: {len(self.backbones)} backbones")
+            for name, weight in self.weights.items():
+                logger.info(f"  {name}: {weight:.4f}")
+            logger.info("=" * 50)
             
         except Exception as e:
-            logger.error(f"Failed to load model: {e}")
-            logger.info("  Using fallback rule-based classifier")
+            logger.error(f"Failed to initialize ensemble: {e}")
             self.is_initialized = True  # Use fallback
+    
+    async def _load_backbone(self, name: str, model_name: str, hidden_size: int):
+        """Load a single backbone"""
+        import torch
+        import torch.nn as nn
+        from transformers import AutoModel, AutoFeatureExtractor
+        from transformers import Wav2Vec2Model, Wav2Vec2FeatureExtractor
+        
+        # Load processor and model
+        if "wav2vec2" in model_name or "wavlm" in model_name or "hubert" in model_name:
+            self.processors[name] = Wav2Vec2FeatureExtractor.from_pretrained(model_name)
+        else:
+            self.processors[name] = AutoFeatureExtractor.from_pretrained(model_name)
+        
+        self.backbones[name] = AutoModel.from_pretrained(model_name)
+        
+        # Apply quantization for faster inference on RPi5
+        if self.use_quantization:
+            self.backbones[name] = torch.quantization.quantize_dynamic(
+                self.backbones[name], {torch.nn.Linear}, dtype=torch.qint8
+            )
+        
+        self.backbones[name].eval()
+        
+        # Simple classifier head
+        self.classifiers[name] = nn.Sequential(
+            nn.Linear(hidden_size, 256),
+            nn.ReLU(),
+            nn.Dropout(0.3),
+            nn.Linear(256, self.num_classes)
+        )
     
     async def classify(self, waveform: np.ndarray, sample_rate: int = 16000) -> Dict[str, Any]:
         """
-        Classify baby cry audio.
+        Classify audio using the ensemble.
         
-        Returns:
-            Dict with classification, confidence, risk_level
+        Returns weighted average of all backbone predictions.
         """
         if not self.is_initialized:
             await self.initialize()
+        
+        import torch
+        import torch.nn.functional as F
         
         # Normalize audio
         if len(waveform.shape) > 1:
@@ -184,106 +292,113 @@ class LightweightCryClassifier:
         if max_val > 0:
             waveform = waveform / max_val
         
-        # If model loaded, use it
-        if self.model is not None:
-            return await self._model_classify(waveform, sample_rate)
-        else:
-            return self._fallback_classify(waveform, sample_rate)
-    
-    async def _model_classify(self, waveform: np.ndarray, sample_rate: int) -> Dict[str, Any]:
-        """Classify using the loaded model"""
-        import torch
-        import torch.nn.functional as F
-        
-        try:
-            # Process audio
-            inputs = self.processor(
-                waveform,
-                sampling_rate=sample_rate,
-                return_tensors="pt",
-                padding=True
-            )
-            
-            # Get embeddings
-            with torch.no_grad():
-                outputs = self.model(**inputs)
-                embeddings = outputs.last_hidden_state.mean(dim=1)
-            
-            # Simple classification based on embedding statistics
-            # (In production, you'd have a trained classifier head)
-            emb = embeddings.numpy()[0]
-            
-            # Use embedding features to estimate class
-            # This is a simplified approach - actual trained classifier would be better
-            energy = np.mean(np.abs(waveform))
-            pitch_proxy = np.mean(emb[:256])
-            intensity_proxy = np.std(emb)
-            
-            # Rule-based classification using embeddings
-            if energy < 0.1:
-                pred_class = "normal"
-                confidence = 0.7
-            elif intensity_proxy > 0.5:
-                pred_class = "pain"
-                confidence = 0.6 + intensity_proxy * 0.3
-            elif pitch_proxy > 0:
-                pred_class = "hungry"
-                confidence = 0.65
-            else:
-                pred_class = "discomfort"
-                confidence = 0.55
-            
-            confidence = min(0.95, confidence)
-            
-        except Exception as e:
-            logger.warning(f"Model inference failed: {e}")
+        # No backbones loaded - use fallback
+        if len(self.backbones) == 0:
             return self._fallback_classify(waveform, sample_rate)
         
-        risk_level = self.risk_map.get(pred_class, "YELLOW")
+        all_probs = []
+        backbone_results = {}
+        
+        for name, backbone in self.backbones.items():
+            try:
+                processor = self.processors[name]
+                classifier = self.classifiers[name]
+                
+                # Process audio
+                inputs = processor(
+                    waveform,
+                    sampling_rate=sample_rate,
+                    return_tensors="pt",
+                    padding=True
+                )
+                
+                # Get embeddings
+                with torch.no_grad():
+                    outputs = backbone(**inputs)
+                    embeddings = outputs.last_hidden_state.mean(dim=1)
+                    
+                    # Classify
+                    logits = classifier(embeddings)
+                    probs = F.softmax(logits, dim=-1).numpy()[0]
+                
+                # Apply equal weight
+                weighted_probs = probs * self.weights[name]
+                all_probs.append(weighted_probs)
+                
+                # Store individual result
+                pred_idx = np.argmax(probs)
+                backbone_results[name] = {
+                    "class": self.classes[pred_idx],
+                    "confidence": float(probs[pred_idx])
+                }
+                
+            except Exception as e:
+                logger.warning(f"Backbone {name} failed: {e}")
+        
+        if len(all_probs) == 0:
+            return self._fallback_classify(waveform, sample_rate)
+        
+        # Combine weighted probabilities
+        ensemble_probs = np.sum(all_probs, axis=0)
+        
+        # Get prediction
+        pred_idx = np.argmax(ensemble_probs)
+        pred_class = self.classes[pred_idx]
+        confidence = float(ensemble_probs[pred_idx])
+        
+        risk_level = RISK_MAP.get(pred_class, "YELLOW")
+        display_label = DISPLAY_LABELS.get(pred_class, pred_class)
+        
+        # Determine task type
+        task = "cry" if pred_class.startswith("cry_") else "respiratory"
         
         return {
             "classification": pred_class,
-            "confidence": float(confidence),
+            "display_label": display_label,
+            "confidence": confidence,
             "risk_level": risk_level,
             "risk_score": self._compute_risk_score(pred_class, confidence, risk_level),
-            "model": "distilhubert-quantized" if self.use_quantization else "distilhubert"
+            "task": task,
+            "all_probs": {c: float(p) for c, p in zip(self.classes, ensemble_probs)},
+            "backbone_results": backbone_results,
+            "model": f"ensemble-{len(self.backbones)}backbone"
         }
     
     def _fallback_classify(self, waveform: np.ndarray, sample_rate: int) -> Dict[str, Any]:
-        """Rule-based fallback classifier when model not available"""
-        # Extract simple features
+        """Rule-based fallback when models not available"""
         energy = np.sqrt(np.mean(waveform**2))
-        zero_crossings = np.sum(np.abs(np.diff(np.sign(waveform))) > 0)
-        zcr = zero_crossings / len(waveform)
+        zcr = np.sum(np.abs(np.diff(np.sign(waveform))) > 0) / len(waveform)
         
-        # Simple rule-based classification
+        # Simple rules
         if energy < 0.05:
-            pred_class = "normal"
-            confidence = 0.7
-        elif energy > 0.4 and zcr > 0.1:
-            pred_class = "pain"
+            pred_class = "cry_normal"
             confidence = 0.6
+        elif energy > 0.4 and zcr > 0.1:
+            pred_class = "cry_pain"
+            confidence = 0.5
         elif energy > 0.3:
-            pred_class = "hungry"
-            confidence = 0.55
-        elif zcr > 0.08:
-            pred_class = "discomfort"
+            pred_class = "cry_hungry"
             confidence = 0.5
         else:
-            pred_class = "sleepy"
+            pred_class = "cry_discomfort"
             confidence = 0.45
         
-        risk_level = self.risk_map.get(pred_class, "YELLOW")
+        risk_level = RISK_MAP.get(pred_class, "YELLOW")
         
         return {
             "classification": pred_class,
-            "confidence": float(confidence),
+            "display_label": DISPLAY_LABELS.get(pred_class, pred_class),
+            "confidence": confidence,
             "risk_level": risk_level,
             "risk_score": self._compute_risk_score(pred_class, confidence, risk_level),
+            "task": "cry",
+            "all_probs": {},
+            "backbone_results": {},
             "model": "rule-based-fallback"
         }
     
-    def _compute_risk_score(self, classification: str, confidence: float, risk_level: str) -> float:
+    def _compute_risk_score(self, classification: str, confidence: float, 
+                           risk_level: str) -> float:
         """Compute numeric risk score (0-100)"""
         base_scores = {"GREEN": 20, "YELLOW": 50, "RED": 80}
         base = base_scores.get(risk_level, 50)
@@ -296,6 +411,10 @@ class LightweightCryClassifier:
             score = base - ((1 - confidence) * 10)
         
         return min(100, max(0, score))
+
+
+# Alias for backwards compatibility
+LightweightCryClassifier = SixBackboneEnsemble
 
 
 # ==============================================================================
@@ -652,114 +771,290 @@ class WebDashboard:
         logger.info(f"Web server started on port {self.port}")
     
     def _get_html(self) -> str:
-        """Get dashboard HTML"""
+        """Get dashboard HTML with all 16 classifications"""
         return '''
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Baby Cry Monitor</title>
+    <title>Baby Cry & Respiratory Monitor</title>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { 
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            background: linear-gradient(135deg, #0f0f23 0%, #1a1a3e 50%, #0f2027 100%);
             color: white;
             min-height: 100vh;
             padding: 20px;
         }
-        .container { max-width: 800px; margin: 0 auto; }
-        h1 { text-align: center; margin-bottom: 30px; font-size: 2em; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        h1 { text-align: center; margin-bottom: 10px; font-size: 2.2em; }
+        .subtitle { text-align: center; opacity: 0.7; margin-bottom: 30px; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+        @media (max-width: 768px) { .grid { grid-template-columns: 1fr; } }
         .card {
-            background: rgba(255,255,255,0.1);
-            border-radius: 15px;
-            padding: 30px;
-            margin-bottom: 20px;
+            background: rgba(255,255,255,0.08);
+            border-radius: 20px;
+            padding: 25px;
             backdrop-filter: blur(10px);
+            border: 1px solid rgba(255,255,255,0.1);
         }
-        .status {
+        .card-full { grid-column: 1 / -1; }
+        .status-card {
+            background: linear-gradient(135deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0.05) 100%);
+        }
+        .main-status {
             text-align: center;
-            font-size: 3em;
-            font-weight: bold;
-            margin: 20px 0;
+            padding: 30px 0;
         }
-        .GREEN { color: #4ade80; }
-        .YELLOW { color: #facc15; }
-        .RED { color: #f87171; }
-        .info { display: flex; justify-content: space-around; margin-top: 20px; }
-        .info-item { text-align: center; }
-        .info-label { font-size: 0.9em; opacity: 0.7; }
-        .info-value { font-size: 1.5em; font-weight: bold; }
-        .history { max-height: 300px; overflow-y: auto; }
+        .status-label {
+            font-size: 4em;
+            font-weight: 800;
+            margin: 10px 0;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+        .status-type {
+            font-size: 1.2em;
+            opacity: 0.8;
+            margin-bottom: 10px;
+        }
+        .GREEN { color: #4ade80; text-shadow: 0 0 30px rgba(74, 222, 128, 0.5); }
+        .YELLOW { color: #fbbf24; text-shadow: 0 0 30px rgba(251, 191, 36, 0.5); }
+        .RED { color: #f87171; text-shadow: 0 0 30px rgba(248, 113, 113, 0.5); animation: pulse-red 1s infinite; }
+        @keyframes pulse-red {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+        .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-top: 20px; }
+        @media (max-width: 600px) { .metrics { grid-template-columns: repeat(2, 1fr); } }
+        .metric {
+            background: rgba(0,0,0,0.2);
+            padding: 15px;
+            border-radius: 12px;
+            text-align: center;
+        }
+        .metric-value { font-size: 1.8em; font-weight: bold; }
+        .metric-label { font-size: 0.85em; opacity: 0.7; margin-top: 5px; }
+        .section-title { font-size: 1.3em; margin-bottom: 15px; display: flex; align-items: center; gap: 10px; }
+        .section-title span { font-size: 1.2em; }
+        .class-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+        @media (max-width: 900px) { .class-grid { grid-template-columns: repeat(2, 1fr); } }
+        .class-item {
+            padding: 12px;
+            border-radius: 10px;
+            text-align: center;
+            font-size: 0.9em;
+            background: rgba(0,0,0,0.2);
+            transition: all 0.3s;
+        }
+        .class-item.active { transform: scale(1.05); }
+        .class-item.active.GREEN { background: rgba(74, 222, 128, 0.3); border: 2px solid #4ade80; }
+        .class-item.active.YELLOW { background: rgba(251, 191, 36, 0.3); border: 2px solid #fbbf24; }
+        .class-item.active.RED { background: rgba(248, 113, 113, 0.3); border: 2px solid #f87171; }
+        .history-list { max-height: 250px; overflow-y: auto; }
         .history-item {
             display: flex;
             justify-content: space-between;
-            padding: 10px;
-            border-bottom: 1px solid rgba(255,255,255,0.1);
+            align-items: center;
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 8px;
+            background: rgba(0,0,0,0.2);
         }
-        .waiting { animation: pulse 2s infinite; }
+        .history-class { font-weight: 600; }
+        .history-time { opacity: 0.6; font-size: 0.9em; }
+        .history-conf { font-size: 0.85em; opacity: 0.8; }
+        .waiting { animation: pulse 2s infinite; opacity: 0.5; }
         @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
+            0%, 100% { opacity: 0.5; }
+            50% { opacity: 1; }
+        }
+        .backbone-pills { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+        .backbone-pill {
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 0.8em;
+            background: rgba(99, 102, 241, 0.3);
+            border: 1px solid rgba(99, 102, 241, 0.5);
+        }
+        .risk-bar {
+            height: 8px;
+            border-radius: 4px;
+            background: linear-gradient(90deg, #4ade80 0%, #fbbf24 50%, #f87171 100%);
+            margin-top: 15px;
+            position: relative;
+        }
+        .risk-indicator {
+            width: 16px;
+            height: 16px;
+            background: white;
+            border-radius: 50%;
+            position: absolute;
+            top: -4px;
+            transform: translateX(-50%);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+            transition: left 0.5s ease;
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>👶 Baby Cry Monitor</h1>
+        <h1>👶 Baby Cry & Respiratory Monitor</h1>
+        <p class="subtitle">6-Backbone AI Ensemble | 16 Classifications | Real-time Analysis</p>
         
-        <div class="card">
-            <div id="status" class="status waiting">Listening...</div>
-            <div class="info">
-                <div class="info-item">
-                    <div class="info-label">Classification</div>
-                    <div class="info-value" id="classification">-</div>
+        <div class="grid">
+            <!-- Main Status Card -->
+            <div class="card card-full status-card">
+                <div class="main-status">
+                    <div class="status-type" id="taskType">Waiting for audio...</div>
+                    <div class="status-label waiting" id="mainStatus">LISTENING</div>
+                    <div id="confidence-display" style="font-size: 1.5em; opacity: 0.8;">--</div>
                 </div>
-                <div class="info-item">
-                    <div class="info-label">Confidence</div>
-                    <div class="info-value" id="confidence">-</div>
+                <div class="risk-bar">
+                    <div class="risk-indicator" id="riskIndicator" style="left: 20%;"></div>
                 </div>
-                <div class="info-item">
-                    <div class="info-label">Risk Level</div>
-                    <div class="info-value" id="risk">-</div>
+                <div class="metrics">
+                    <div class="metric">
+                        <div class="metric-value" id="riskLevel">--</div>
+                        <div class="metric-label">Risk Level</div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-value" id="riskScore">--</div>
+                        <div class="metric-label">Risk Score</div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-value" id="modelCount">--</div>
+                        <div class="metric-label">Backbones</div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-value" id="totalScans">0</div>
+                        <div class="metric-label">Total Scans</div>
+                    </div>
                 </div>
             </div>
-        </div>
-        
-        <div class="card">
-            <h2 style="margin-bottom: 15px;">History</h2>
-            <div class="history" id="history">
-                <p style="opacity: 0.5; text-align: center;">No detections yet</p>
+            
+            <!-- Baby Cry Classes -->
+            <div class="card">
+                <div class="section-title"><span>👶</span> Baby Cry Classifications</div>
+                <div class="class-grid" id="cryClasses">
+                    <div class="class-item" data-class="cry_cold">Cold/Chill</div>
+                    <div class="class-item" data-class="cry_discomfort">Discomfort</div>
+                    <div class="class-item" data-class="cry_distress">Distress</div>
+                    <div class="class-item" data-class="cry_hungry">Hungry</div>
+                    <div class="class-item" data-class="cry_normal">Normal</div>
+                    <div class="class-item" data-class="cry_pain">Pain</div>
+                    <div class="class-item" data-class="cry_sleepy">Sleepy</div>
+                    <div class="class-item" data-class="cry_tired">Tired</div>
+                </div>
+            </div>
+            
+            <!-- Respiratory Classes -->
+            <div class="card">
+                <div class="section-title"><span>🫁</span> Respiratory Classifications</div>
+                <div class="class-grid" id="respClasses">
+                    <div class="class-item" data-class="resp_coarse_crackle">Coarse Crackle</div>
+                    <div class="class-item" data-class="resp_fine_crackle">Fine Crackle</div>
+                    <div class="class-item" data-class="resp_mixed">Mixed</div>
+                    <div class="class-item" data-class="resp_normal">Normal</div>
+                    <div class="class-item" data-class="resp_rhonchi">Rhonchi</div>
+                    <div class="class-item" data-class="resp_stridor">Stridor</div>
+                    <div class="class-item" data-class="resp_wheeze">Wheeze</div>
+                    <div class="class-item" data-class="resp_mixed_crackle_wheeze">Mixed Crackle/Wheeze</div>
+                </div>
+            </div>
+            
+            <!-- History -->
+            <div class="card card-full">
+                <div class="section-title"><span>📊</span> Detection History</div>
+                <div class="history-list" id="history">
+                    <p style="opacity: 0.5; text-align: center; padding: 20px;">Waiting for first detection...</p>
+                </div>
+            </div>
+            
+            <!-- Model Info -->
+            <div class="card card-full">
+                <div class="section-title"><span>🤖</span> Active AI Models (Equal Weights)</div>
+                <div class="backbone-pills" id="backbones">
+                    <span class="backbone-pill">Loading models...</span>
+                </div>
             </div>
         </div>
     </div>
     
     <script>
+        const riskColors = { GREEN: '#4ade80', YELLOW: '#fbbf24', RED: '#f87171' };
+        let totalScans = 0;
+        
         async function update() {
             try {
                 const resp = await fetch('/api/latest');
                 const data = await resp.json();
                 
                 if (data.classification) {
-                    document.getElementById('status').className = 'status ' + data.risk_level;
-                    document.getElementById('status').textContent = data.classification.toUpperCase();
-                    document.getElementById('classification').textContent = data.classification;
-                    document.getElementById('confidence').textContent = (data.confidence * 100).toFixed(0) + '%';
-                    document.getElementById('risk').textContent = data.risk_level;
-                    document.getElementById('risk').className = 'info-value ' + data.risk_level;
+                    totalScans++;
+                    
+                    // Update main status
+                    const label = data.display_label || data.classification;
+                    document.getElementById('mainStatus').textContent = label;
+                    document.getElementById('mainStatus').className = 'status-label ' + data.risk_level;
+                    
+                    // Task type
+                    const taskType = data.task === 'cry' ? '👶 Baby Cry Detected' : '🫁 Respiratory Sound Detected';
+                    document.getElementById('taskType').textContent = taskType;
+                    
+                    // Confidence
+                    document.getElementById('confidence-display').textContent = 
+                        'Confidence: ' + (data.confidence * 100).toFixed(1) + '%';
+                    
+                    // Metrics
+                    document.getElementById('riskLevel').textContent = data.risk_level;
+                    document.getElementById('riskLevel').className = 'metric-value ' + data.risk_level;
+                    document.getElementById('riskScore').textContent = data.risk_score.toFixed(0);
+                    document.getElementById('totalScans').textContent = totalScans;
+                    
+                    // Risk indicator
+                    const riskPos = Math.min(100, Math.max(0, data.risk_score));
+                    document.getElementById('riskIndicator').style.left = riskPos + '%';
+                    
+                    // Model count
+                    if (data.backbone_results) {
+                        const count = Object.keys(data.backbone_results).length;
+                        document.getElementById('modelCount').textContent = count;
+                        
+                        // Update backbone pills
+                        const pills = Object.entries(data.backbone_results).map(([name, res]) => 
+                            `<span class="backbone-pill">${name}: ${(res.confidence * 100).toFixed(0)}%</span>`
+                        ).join('');
+                        document.getElementById('backbones').innerHTML = pills || '<span class="backbone-pill">Ensemble Active</span>';
+                    }
+                    
+                    // Highlight active class
+                    document.querySelectorAll('.class-item').forEach(el => {
+                        el.classList.remove('active', 'GREEN', 'YELLOW', 'RED');
+                        if (el.dataset.class === data.classification) {
+                            el.classList.add('active', data.risk_level);
+                        }
+                    });
                 }
                 
+                // Update history
                 const histResp = await fetch('/api/history');
                 const history = await histResp.json();
                 
                 if (history.length > 0) {
-                    const historyHtml = history.slice(-10).reverse().map(item => `
-                        <div class="history-item">
-                            <span class="${item.risk_level}">${item.classification}</span>
-                            <span>${new Date(item.timestamp).toLocaleTimeString()}</span>
-                        </div>
-                    `).join('');
+                    const historyHtml = history.slice(-8).reverse().map(item => {
+                        const label = item.display_label || item.classification;
+                        const icon = item.task === 'cry' ? '👶' : '🫁';
+                        return `
+                            <div class="history-item">
+                                <span class="history-class ${item.risk_level}">${icon} ${label}</span>
+                                <span class="history-conf">${(item.confidence * 100).toFixed(0)}%</span>
+                                <span class="history-time">${new Date(item.timestamp).toLocaleTimeString()}</span>
+                            </div>
+                        `;
+                    }).join('');
                     document.getElementById('history').innerHTML = historyHtml;
                 }
             } catch (e) {

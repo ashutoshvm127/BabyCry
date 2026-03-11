@@ -7,9 +7,10 @@
     "use_sounddevice": true
   },
   "model": {
-    "type": "lightweight",
+    "type": "ensemble",
     "use_quantization": true,
-    "batch_size": 1
+    "load_all_backbones": false,
+    "backbones": ["distilhubert", "wav2vec2"]
   },
   "web": {
     "enabled": true,
@@ -27,9 +28,15 @@
   "history": {
     "max_entries": 100
   },
+  "classifications": {
+    "baby_cry": ["cry_cold", "cry_discomfort", "cry_distress", "cry_hungry", "cry_normal", "cry_pain", "cry_sleepy", "cry_tired"],
+    "respiratory": ["resp_coarse_crackle", "resp_fine_crackle", "resp_mixed", "resp_normal", "resp_rhonchi", "resp_stridor", "resp_wheeze", "resp_mixed_crackle_wheeze"]
+  },
   "_notes": {
     "oled_address": "0x3C = 60 decimal",
     "led_pins": "BCM numbering: GREEN=17, YELLOW=27, RED=22",
-    "device_name": "Set to 'plughw:1,0' for I2S mic, or null for auto-detect"
+    "device_name": "Set to 'plughw:1,0' for I2S mic, or null for auto-detect",
+    "load_all_backbones": "Set to true to load all 4 backbones (uses more RAM)",
+    "total_classes": "16 classes: 8 baby cry + 8 respiratory"
   }
 }

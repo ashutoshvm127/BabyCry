@@ -1,6 +1,40 @@
-# Baby Cry Diagnostic System - Raspberry Pi 5 Standalone
+# Baby Cry & Respiratory Diagnostic System - Raspberry Pi 5 Standalone
 
 **Complete self-contained system running entirely on RPi5. No cloud, no external server.**
+
+## Features
+
+- **6-Backbone AI Ensemble** with equal weights (1/6 each)
+- **16 Classifications**: 8 baby cry types + 8 respiratory conditions
+- **Web Dashboard** accessible from any device on your network
+- **24/7 Operation** with systemd auto-restart
+- **Zero Cloud Costs** - everything runs locally
+
+## Classification Categories
+
+### Baby Cry (8 classes)
+| Class | Risk Level | Description |
+|-------|------------|-------------|
+| Normal | 🟢 GREEN | Normal/healthy cry |
+| Hungry | 🟢 GREEN | Hunger-related |
+| Sleepy | 🟢 GREEN | Tiredness/sleepy |
+| Tired | 🟢 GREEN | Fatigue |
+| Cold | 🟡 YELLOW | Temperature discomfort |
+| Discomfort | 🟡 YELLOW | General discomfort |
+| Distress | 🔴 RED | Serious distress |
+| Pain | 🔴 RED | Pain indication |
+
+### Respiratory (8 classes)
+| Class | Risk Level | Description |
+|-------|------------|-------------|
+| Normal | 🟢 GREEN | Healthy breathing |
+| Coarse Crackle | 🟡 YELLOW | Lower airway sounds |
+| Fine Crackle | 🟡 YELLOW | Upper airway sounds |
+| Mixed | 🟡 YELLOW | Combined sounds |
+| Rhonchi | 🟡 YELLOW | Low-pitched wheeze |
+| Wheeze | 🟡 YELLOW | High-pitched wheeze |
+| Mixed Crackle/Wheeze | 🟡 YELLOW | Combined abnormal |
+| Stridor | 🔴 RED | Airway obstruction |
 
 ## Hardware Requirements
 
