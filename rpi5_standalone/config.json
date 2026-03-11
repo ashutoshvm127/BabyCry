@@ -1,0 +1,35 @@
+{
+  "audio": {
+    "sample_rate": 16000,
+    "channels": 1,
+    "chunk_duration": 5.0,
+    "device_name": null,
+    "use_sounddevice": true
+  },
+  "model": {
+    "type": "lightweight",
+    "use_quantization": true,
+    "batch_size": 1
+  },
+  "web": {
+    "enabled": true,
+    "host": "0.0.0.0",
+    "port": 8080
+  },
+  "display": {
+    "oled_enabled": false,
+    "oled_address": 60,
+    "led_enabled": false,
+    "led_green": 17,
+    "led_yellow": 27,
+    "led_red": 22
+  },
+  "history": {
+    "max_entries": 100
+  },
+  "_notes": {
+    "oled_address": "0x3C = 60 decimal",
+    "led_pins": "BCM numbering: GREEN=17, YELLOW=27, RED=22",
+    "device_name": "Set to 'plughw:1,0' for I2S mic, or null for auto-detect"
+  }
+}

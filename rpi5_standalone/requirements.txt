@@ -1,0 +1,41 @@
+# ==============================================================================
+# Baby Cry Monitor - RPi5 Standalone Requirements
+# ==============================================================================
+# Optimized for Raspberry Pi 5 (ARM64)
+
+# Audio Capture
+sounddevice>=0.4.6
+
+# Machine Learning (lightweight)
+torch>=2.0.0
+transformers>=4.30.0
+
+# Signal Processing
+numpy>=1.24.0
+
+# Web Dashboard
+fastapi>=0.100.0
+uvicorn>=0.23.0
+
+# Display (optional - only if using OLED)
+pillow>=10.0.0
+# luma.oled>=3.12.0
+# luma.core>=2.4.0
+
+# ==============================================================================
+# Installation Notes for RPi5:
+# ==============================================================================
+# 
+# 1. Install system dependencies first:
+#    sudo apt install -y libportaudio2 portaudio19-dev libatlas-base-dev
+#
+# 2. For PyTorch on ARM64 (RPi5):
+#    pip install torch --index-url https://download.pytorch.org/whl/cpu
+#
+# 3. For OLED display support:
+#    pip install luma.oled luma.core
+#
+# 4. For GPIO/LEDs:
+#    sudo apt install python3-rpi.gpio
+#
+# ==============================================================================
