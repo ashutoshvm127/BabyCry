@@ -1,0 +1,28 @@
+{
+  "cry_classes": {
+    "hungry_cry": 764,
+    "pain_cry": 48,
+    "sleepy_cry": 150,
+    "discomfort_cry": 105,
+    "cold_cry": 150,
+    "tired_cry": 174,
+    "normal_cry": 1505,
+    "distress_cry": 80,
+    "belly_pain_cry": 16,
+    "burping_cry": 8,
+    "pathological_cry": 50,
+    "asphyxia_cry": 20
+  },
+  "pulmonary_classes": {
+    "normal_breathing": 4322,
+    "wheeze": 471,
+    "stridor": 29,
+    "rhonchi": 152,
+    "fine_crackle": 486,
+    "coarse_crackle": 417,
+    "mixed": 351,
+    "bronchiolitis": 100
+  },
+  "total_cry": 3070,
+  "total_pulmonary": 6328
+}

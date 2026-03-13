@@ -55,7 +55,7 @@ INMP441 Pin    →    Raspberry Pi 5 GPIO
 ─────────────────────────────────────────
 VDD            →    3.3V (Pin 1)
 GND            →    GND (Pin 6)
-SD (Data)      →    GPIO 21 / PCM_DIN (Pin 40)
+SD (Data)      →    GPIO 20 / PCM_DIN (Pin 38)
 SCK (Clock)    →    GPIO 18 / PCM_CLK (Pin 12)
 WS (Word Sel)  →    GPIO 19 / PCM_FS (Pin 35)
 L/R            →    GND (for LEFT channel) or 3.3V (for RIGHT)
@@ -85,8 +85,8 @@ L/R            →    GND (for LEFT channel) or 3.3V (for RIGHT)
                [31] │ ●  ●                    │ [32]
                [33] │ ●  ●                    │ [34] GND
    GPIO19 (FS) [35] │ ●  ●                    │ [36] ◄─── INMP441 WS
-               [37] │ ●  ●                    │ [38]
-           GND [39] │ ●  ●                    │ [40] GPIO21 (PCM_DIN) ◄─── INMP441 SD
+               [37] │ ●  ●                    │ [38] GPIO20 (PCM_DIN) ◄─── INMP441 SD
+           GND [39] │ ●  ●                    │ [40]
                     └─────────────────────────┘
 ```
 

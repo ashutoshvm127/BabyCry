@@ -99,259 +99,410 @@ def load_config() -> dict:
 
 
 # ==============================================================================
-# All Classification Classes (16 total)
+# All Classification Classes (20 total) - cry/sound-based, INMP441 mic compatible
 # ==============================================================================
 
-# Baby Cry Classes (8)
+# Baby Cry Classes (12)
 CRY_CLASSES = [
-    "cry_cold", "cry_discomfort", "cry_distress", "cry_hungry",
-    "cry_normal", "cry_pain", "cry_sleepy", "cry_tired"
+    "hungry_cry", "pain_cry", "sleepy_cry", "discomfort_cry",
+    "cold_cry", "tired_cry", "normal_cry", "distress_cry",
+    "belly_pain_cry", "burping_cry", "pathological_cry", "asphyxia_cry"
 ]
 
-# Respiratory Classes (8)  
-RESPIRATORY_CLASSES = [
-    "resp_coarse_crackle", "resp_fine_crackle", "resp_mixed",
-    "resp_normal", "resp_rhonchi", "resp_stridor", "resp_wheeze",
-    "resp_mixed_crackle_wheeze"
+# Health/Respiratory Classes (8) - all detectable from cry/audible sounds
+HEALTH_CLASSES = [
+    "sepsis_cry", "colic_cry", "pneumonia_cry", "respiratory_distress",
+    "normal_breathing", "wheezing", "stridor", "bronchiolitis"
 ]
 
-ALL_CLASSES = CRY_CLASSES + RESPIRATORY_CLASSES
+ALL_CLASSES = CRY_CLASSES + HEALTH_CLASSES
 
-# Risk Mapping for all classes
+# Risk Mapping for all 20 classes
 RISK_MAP = {
-    # Baby Cry - GREEN
-    "cry_normal": "GREEN", "cry_hungry": "GREEN", 
-    "cry_sleepy": "GREEN", "cry_tired": "GREEN",
-    # Baby Cry - YELLOW  
-    "cry_cold": "YELLOW", "cry_discomfort": "YELLOW",
-    # Baby Cry - RED
-    "cry_distress": "RED", "cry_pain": "RED",
+    # Baby Cry - GREEN (low risk)
+    "normal_cry": "GREEN", "hungry_cry": "GREEN",
+    "sleepy_cry": "GREEN", "tired_cry": "GREEN",
+    "burping_cry": "GREEN",
+    # Baby Cry - YELLOW (moderate risk)
+    "cold_cry": "YELLOW", "discomfort_cry": "YELLOW",
+    "belly_pain_cry": "YELLOW", "colic_cry": "YELLOW",
+    # Baby Cry - ORANGE (elevated risk)
+    "distress_cry": "ORANGE", "respiratory_distress": "ORANGE",
+    "wheezing": "ORANGE",
+    # Baby Cry - RED (critical, urgent care needed)
+    "pain_cry": "RED", "pathological_cry": "RED", "asphyxia_cry": "RED",
+    "sepsis_cry": "RED", "pneumonia_cry": "RED",
+    "stridor": "RED", "bronchiolitis": "RED",
     # Respiratory - GREEN
-    "resp_normal": "GREEN",
-    # Respiratory - YELLOW
-    "resp_coarse_crackle": "YELLOW", "resp_fine_crackle": "YELLOW",
-    "resp_mixed": "YELLOW", "resp_rhonchi": "YELLOW", 
-    "resp_wheeze": "YELLOW", "resp_mixed_crackle_wheeze": "YELLOW",
-    # Respiratory - RED
-    "resp_stridor": "RED"
+    "normal_breathing": "GREEN",
 }
 
-# Human-readable labels
+# Human-readable labels for display
 DISPLAY_LABELS = {
-    "cry_cold": "Cold/Chill", "cry_discomfort": "Discomfort",
-    "cry_distress": "Distress", "cry_hungry": "Hungry",
-    "cry_normal": "Normal Cry", "cry_pain": "Pain",
-    "cry_sleepy": "Sleepy", "cry_tired": "Tired",
-    "resp_coarse_crackle": "Coarse Crackle", "resp_fine_crackle": "Fine Crackle",
-    "resp_mixed": "Mixed Sounds", "resp_normal": "Normal Breathing",
-    "resp_rhonchi": "Rhonchi", "resp_stridor": "Stridor",
-    "resp_wheeze": "Wheeze", "resp_mixed_crackle_wheeze": "Mixed Crackle/Wheeze"
+    # Baby Cry
+    "normal_cry": "Normal Cry", "hungry_cry": "Hungry",
+    "sleepy_cry": "Sleepy", "tired_cry": "Tired",
+    "burping_cry": "Needs Burping", "cold_cry": "Cold/Hot",
+    "discomfort_cry": "Discomfort", "belly_pain_cry": "Belly Pain",
+    "distress_cry": "Distress", "pain_cry": "Pain",
+    "pathological_cry": "\u26a0\ufe0f PATHOLOGICAL",
+    "asphyxia_cry": "\ud83d\udea8 ASPHYXIA - EMERGENCY",
+    # Health indicators from cry
+    "sepsis_cry": "\ud83d\udea8 SEPSIS - EMERGENCY",
+    "colic_cry": "Colic",
+    "pneumonia_cry": "\ud83d\udea8 PNEUMONIA INDICATORS",
+    "respiratory_distress": "\u26a0\ufe0f Respiratory Distress",
+    # Audible respiratory
+    "normal_breathing": "Normal Breathing",
+    "wheezing": "Wheezing",
+    "stridor": "\u26a0\ufe0f STRIDOR - URGENT",
+    "bronchiolitis": "\ud83d\udea8 Bronchiolitis/RSV",
+}
+
+# Recommendations for each class
+RECOMMENDATIONS = {
+    # Low risk
+    "normal_cry": "Baby is fine, just expressing",
+    "hungry_cry": "Try feeding the baby",
+    "sleepy_cry": "Baby may be tired, try soothing",
+    "tired_cry": "Baby is tired, needs rest",
+    "burping_cry": "Try gentle burping",
+    "normal_breathing": "Breathing sounds normal",
+    # Moderate risk
+    "cold_cry": "Check temperature, adjust clothing",
+    "discomfort_cry": "Check for wet diaper, gas, or discomfort",
+    "belly_pain_cry": "Possible gas pain. Try gentle massage",
+    "colic_cry": "Colic episode. Swaddle, white noise, gentle rocking",
+    # Elevated risk
+    "distress_cry": "Baby is distressed. Check all basics first",
+    "respiratory_distress": "\u26a0\ufe0f Labored breathing. Position upright. Seek evaluation",
+    "wheezing": "\u26a0\ufe0f Monitor breathing closely. Consult doctor if persistent",
+    # Critical
+    "pain_cry": "Baby may be in pain. Examine and seek help",
+    "pathological_cry": "UNUSUAL CRY PATTERN - Seek immediate evaluation",
+    "asphyxia_cry": "\ud83d\udea8 EMERGENCY: Signs of oxygen deprivation. Call 911/999",
+    "sepsis_cry": "\ud83d\udea8 EMERGENCY: Possible neonatal sepsis. Seek IMMEDIATE medical care",
+    "pneumonia_cry": "\ud83d\udea8 Pneumonia indicators detected. Seek immediate pediatric care",
+    "stridor": "\u26a0\ufe0f URGENT: Upper airway issue - Seek immediate care",
+    "bronchiolitis": "\ud83d\udea8 RSV/Bronchiolitis detected - Seek immediate pediatric care",
 }
 
 # ==============================================================================
 # 6-Backbone Ensemble Classifier
 # ==============================================================================
 
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+
+class LibrosaASTProcessor:
+    """Custom AST feature extractor using librosa (no torchaudio needed)."""
+    def __init__(self, sr=16000, n_mels=128, target_length=1024,
+                 fft_size=400, hop_size=160, mean=-4.2677, std=4.5689):
+        self.sr = sr
+        self.n_mels = n_mels
+        self.target_length = target_length
+        self.fft_size = fft_size
+        self.hop_size = hop_size
+        self.mean = mean
+        self.std = std
+
+    def __call__(self, y, sampling_rate=16000, return_tensors="pt", **kwargs):
+        import librosa
+        mel = librosa.feature.melspectrogram(
+            y=y, sr=sampling_rate, n_fft=self.fft_size,
+            hop_length=self.hop_size, n_mels=self.n_mels
+        )
+        log_mel = librosa.power_to_db(mel, ref=np.max).T
+        if log_mel.shape[0] < self.target_length:
+            pad = np.zeros((self.target_length - log_mel.shape[0], self.n_mels), dtype=np.float32)
+            log_mel = np.concatenate([log_mel, pad], axis=0)
+        else:
+            log_mel = log_mel[:self.target_length]
+        log_mel = (log_mel - self.mean) / (self.std * 2)
+        tensor = torch.tensor(log_mel, dtype=torch.float32).unsqueeze(0)
+        return {"input_values": tensor}
+
+
+class FusionClassifier(nn.Module):
+    """Backbone embedding + hand-crafted features -> class prediction.
+    Must match the architecture used during training."""
+    def __init__(self, backbone_dim, handcrafted_dim=85, num_classes=20, dropout=0.3):
+        super().__init__()
+        input_dim = backbone_dim + handcrafted_dim
+        hidden = 512
+        self.bn_input = nn.BatchNorm1d(input_dim)
+        self.fc1 = nn.Linear(input_dim, hidden)
+        self.bn1 = nn.BatchNorm1d(hidden)
+        self.fc2 = nn.Linear(hidden, hidden)
+        self.bn2 = nn.BatchNorm1d(hidden)
+        self.fc3 = nn.Linear(hidden, 256)
+        self.bn3 = nn.BatchNorm1d(256)
+        self.fc_out = nn.Linear(256, num_classes)
+        self.drop1 = nn.Dropout(dropout)
+        self.drop2 = nn.Dropout(dropout * 0.5)
+        self.drop3 = nn.Dropout(dropout * 0.5)
+        self.res_proj = nn.Linear(input_dim, hidden) if input_dim != hidden else nn.Identity()
+
+    def forward(self, x):
+        x = self.bn_input(x)
+        identity = self.res_proj(x)
+        x = F.gelu(self.bn1(self.fc1(x)))
+        x = self.drop1(x)
+        x = F.gelu(self.bn2(self.fc2(x)))
+        x = self.drop2(x)
+        x = x + identity
+        x = F.gelu(self.bn3(self.fc3(x)))
+        x = self.drop3(x)
+        return self.fc_out(x)
+
+
 class SixBackboneEnsemble:
     """
     Full 6-backbone ensemble with EQUAL weights (1/6 each).
-    
+    Loads trained FusionClassifier heads from checkpoint.
+
     Backbones:
-    1. DistilHuBERT - Fast, efficient
-    2. Wav2Vec2 - Strong audio understanding
-    3. WavLM - Good for speech/audio
-    4. HuBERT - Robust representations
-    5. AST - Spectrogram-based
-    6. (Optional) Additional backbone
-    
-    Each backbone contributes equally to final prediction.
+    1. DistilHuBERT  (ntu-spml/distilhubert)                  - 768-dim
+    2. HuBERT        (facebook/hubert-base-ls960)              - 768-dim
+    3. Wav2Vec2      (facebook/wav2vec2-base)                  - 768-dim
+    4. WavLM         (microsoft/wavlm-base)                    - 768-dim
+    5. AST           (MIT/ast-finetuned-audioset-10-10-0.4593) - 768-dim
+    6. CLAP          (laion/clap-htsat-unfused)                - 512-dim
+
+    All disease detection is from baby cries + audible sounds via INMP441 mic.
     """
-    
-    def __init__(self, use_quantization: bool = True, load_all: bool = False):
+
+    def __init__(self, use_quantization: bool = True):
         self.use_quantization = use_quantization
-        self.load_all = load_all
         self.device = "cpu"
         self.is_initialized = False
-        
+
         self.backbones = {}
         self.processors = {}
         self.classifiers = {}
-        
-        # EQUAL weights for all backbones (1/6 = 0.1667)
         self.weights = {}
-        
+        self.hc_mean = None
+        self.hc_std = None
+
         self.classes = ALL_CLASSES
         self.num_classes = len(ALL_CLASSES)
-    
+
     async def initialize(self):
-        """Initialize the ensemble"""
+        """Initialize ensemble: load all 6 backbones + trained classifier heads."""
         if self.is_initialized:
             return
-        
+
         logger.info("=" * 50)
         logger.info("LOADING 6-BACKBONE ENSEMBLE")
         logger.info("All models have EQUAL weight (1/6)")
         logger.info("=" * 50)
-        
+
         try:
             import torch
             import torch.nn as nn
-            
-            # Backbone configs
-            backbone_configs = [
-                ("distilhubert", "ntu-spml/distilhubert", 768),
-                ("wav2vec2", "facebook/wav2vec2-base", 768),
-            ]
-            
-            # Add more backbones if load_all is True
-            if self.load_all:
-                backbone_configs.extend([
-                    ("wavlm", "microsoft/wavlm-base", 768),
-                    ("hubert", "facebook/hubert-base-ls960", 768),
-                ])
-            
-            num_backbones = len(backbone_configs)
-            equal_weight = 1.0 / num_backbones
-            
-            for name, model_name, hidden_size in backbone_configs:
-                logger.info(f"  Loading {name} ({model_name})...")
-                
+            import torch.nn.functional as F
+
+            # Load trained checkpoint
+            model_path = Path(__file__).parent / "models" / "6backbone_ensemble.pt"
+            checkpoint = None
+            if model_path.exists():
+                checkpoint = torch.load(str(model_path), map_location="cpu", weights_only=False)
+                logger.info(f"  Loaded checkpoint: {model_path.name}")
+                logger.info(f"  Ensemble accuracy: {checkpoint.get('metadata', {}).get('ensemble_val_acc', 0)*100:.1f}%")
+                self.hc_mean = checkpoint.get('handcrafted_mean')
+                self.hc_std = checkpoint.get('handcrafted_std')
+
+            # Read backbone configs from checkpoint (matches training)
+            if checkpoint and 'backbones' in checkpoint:
+                backbone_configs = [
+                    (name, info['hf_name'], info['dim'], info['type'])
+                    for name, info in checkpoint['backbones'].items()
+                ]
+            else:
+                backbone_configs = [
+                    ("distilhubert", "ntu-spml/distilhubert", 768, "wav2vec2"),
+                    ("hubert", "facebook/hubert-base-ls960", 768, "wav2vec2"),
+                    ("wav2vec2", "facebook/wav2vec2-base", 768, "wav2vec2"),
+                    ("wavlm", "microsoft/wavlm-base", 768, "wav2vec2"),
+                    ("ast", "MIT/ast-finetuned-audioset-10-10-0.4593", 768, "ast"),
+                    ("clap", "laion/clap-htsat-unfused", 512, "clap"),
+                ]
+
+            for name, hf_name, dim, btype in backbone_configs:
+                logger.info(f"  Loading {name} ({hf_name})...")
                 try:
-                    await self._load_backbone(name, model_name, hidden_size)
-                    self.weights[name] = equal_weight
-                    logger.info(f"    [OK] Weight: {equal_weight:.4f}")
+                    await self._load_backbone(name, hf_name, dim, btype, checkpoint)
+                    logger.info(f"    [OK] {name} loaded")
                 except Exception as e:
                     logger.warning(f"    [SKIP] {name}: {e}")
-            
-            # Recalculate weights if some failed
+
+            # Equal weights for loaded backbones
             if len(self.backbones) > 0:
                 equal_weight = 1.0 / len(self.backbones)
                 for name in self.backbones:
                     self.weights[name] = equal_weight
-            
+
             self.is_initialized = True
-            
             logger.info("=" * 50)
             logger.info(f"Ensemble ready: {len(self.backbones)} backbones")
             for name, weight in self.weights.items():
                 logger.info(f"  {name}: {weight:.4f}")
             logger.info("=" * 50)
-            
+
         except Exception as e:
             logger.error(f"Failed to initialize ensemble: {e}")
             self.is_initialized = True  # Use fallback
-    
-    async def _load_backbone(self, name: str, model_name: str, hidden_size: int):
-        """Load a single backbone"""
+
+    async def _load_backbone(self, name, hf_name, dim, btype, checkpoint):
+        """Load one backbone feature extractor + trained classifier head."""
         import torch
         import torch.nn as nn
-        from transformers import AutoModel, AutoFeatureExtractor
-        from transformers import Wav2Vec2Model, Wav2Vec2FeatureExtractor
-        
-        # Load processor and model
-        if "wav2vec2" in model_name or "wavlm" in model_name or "hubert" in model_name:
-            self.processors[name] = Wav2Vec2FeatureExtractor.from_pretrained(model_name)
+
+        # Load feature extractor
+        if btype == "wav2vec2":
+            from transformers import AutoModel, AutoFeatureExtractor
+            self.processors[name] = AutoFeatureExtractor.from_pretrained(hf_name)
+            backbone = AutoModel.from_pretrained(hf_name)
+        elif btype == "ast":
+            from transformers import ASTModel
+            # Custom processor using librosa (no torchaudio dependency)
+            self.processors[name] = LibrosaASTProcessor()
+            backbone = ASTModel.from_pretrained(hf_name)
+        elif btype == "clap":
+            from transformers import ClapModel, ClapProcessor
+            self.processors[name] = ClapProcessor.from_pretrained(hf_name)
+            backbone = ClapModel.from_pretrained(hf_name)
         else:
-            self.processors[name] = AutoFeatureExtractor.from_pretrained(model_name)
-        
-        self.backbones[name] = AutoModel.from_pretrained(model_name)
-        
-        # Apply quantization for faster inference on RPi5
-        if self.use_quantization:
-            self.backbones[name] = torch.quantization.quantize_dynamic(
-                self.backbones[name], {torch.nn.Linear}, dtype=torch.qint8
+            raise ValueError(f"Unknown backbone type: {btype}")
+
+        if self.use_quantization and btype != "clap":
+            backbone = torch.quantization.quantize_dynamic(
+                backbone, {torch.nn.Linear}, dtype=torch.qint8
             )
-        
-        self.backbones[name].eval()
-        
-        # Simple classifier head
-        self.classifiers[name] = nn.Sequential(
-            nn.Linear(hidden_size, 256),
-            nn.ReLU(),
-            nn.Dropout(0.3),
-            nn.Linear(256, self.num_classes)
-        )
+        backbone.eval()
+        self.backbones[name] = backbone
+
+        # Load trained classifier from checkpoint
+        classifier = FusionClassifier(dim, 85, self.num_classes)
+        if checkpoint and name in checkpoint.get('backbones', {}):
+            state_dict = checkpoint['backbones'][name]['state_dict']
+            classifier.load_state_dict(state_dict)
+            logger.info(f"    Loaded trained classifier for {name}")
+        classifier.eval()
+        self.classifiers[name] = classifier
     
+    def _extract_handcrafted(self, waveform, sr=16000):
+        """Extract 85-dim hand-crafted features for fusion."""
+        import librosa
+        try:
+            mfccs = librosa.feature.mfcc(y=waveform, sr=sr, n_mfcc=40)
+            mfcc_mean = np.mean(mfccs, axis=1)
+            mfcc_std = np.std(mfccs, axis=1)
+            sc = np.mean(librosa.feature.spectral_centroid(y=waveform, sr=sr))
+            sb = np.mean(librosa.feature.spectral_bandwidth(y=waveform, sr=sr))
+            sr_ = np.mean(librosa.feature.spectral_rolloff(y=waveform, sr=sr))
+            zcr = np.mean(librosa.feature.zero_crossing_rate(waveform))
+            rms = np.mean(librosa.feature.rms(y=waveform))
+            feat = np.concatenate([mfcc_mean, mfcc_std, [sc, sb, sr_, zcr, rms]])
+            if not np.isfinite(feat).all():
+                return np.zeros(85, dtype=np.float32)
+            # Normalize using training stats
+            feat = feat.astype(np.float32)
+            if self.hc_mean is not None and self.hc_std is not None:
+                feat = (feat - self.hc_mean) / (self.hc_std + 1e-8)
+            return feat
+        except Exception:
+            return np.zeros(85, dtype=np.float32)
+
+    def _get_backbone_embedding(self, name, backbone, processor, waveform, sr):
+        """Extract embedding from one backbone."""
+        import torch
+        btype = "clap" if name == "clap" else ("ast" if name == "ast" else "wav2vec2")
+
+        if btype == "wav2vec2":
+            inputs = processor(waveform, sampling_rate=sr, return_tensors="pt", padding=True)
+            with torch.no_grad():
+                out = backbone(**inputs)
+            return out.last_hidden_state.mean(dim=1).squeeze(0).numpy()
+        elif btype == "ast":
+            inputs = processor(waveform, sampling_rate=sr, return_tensors="pt", padding=True)
+            with torch.no_grad():
+                out = backbone(**inputs)
+            return out.last_hidden_state.mean(dim=1).squeeze(0).numpy()
+        elif btype == "clap":
+            inputs = processor(audios=waveform, return_tensors="pt", sampling_rate=48000)
+            with torch.no_grad():
+                return backbone.get_audio_features(**inputs).squeeze(0).numpy()
+
     async def classify(self, waveform: np.ndarray, sample_rate: int = 16000) -> Dict[str, Any]:
         """
-        Classify audio using the ensemble.
-        
-        Returns weighted average of all backbone predictions.
+        Classify audio using the 6-backbone ensemble.
+        Each backbone: extract embedding + hand-crafted -> FusionClassifier -> softmax.
+        Final: weighted average of all backbone predictions (equal 1/6).
         """
         if not self.is_initialized:
             await self.initialize()
-        
+
         import torch
         import torch.nn.functional as F
-        
+
         # Normalize audio
         if len(waveform.shape) > 1:
             waveform = waveform.mean(axis=0)
-        
         max_val = np.max(np.abs(waveform))
         if max_val > 0:
             waveform = waveform / max_val
-        
-        # No backbones loaded - use fallback
+
         if len(self.backbones) == 0:
             return self._fallback_classify(waveform, sample_rate)
-        
+
+        # Extract hand-crafted features (shared across all backbones)
+        hc_feat = self._extract_handcrafted(waveform, sample_rate)
+
         all_probs = []
         backbone_results = {}
-        
+
         for name, backbone in self.backbones.items():
             try:
                 processor = self.processors[name]
                 classifier = self.classifiers[name]
-                
-                # Process audio
-                inputs = processor(
-                    waveform,
-                    sampling_rate=sample_rate,
-                    return_tensors="pt",
-                    padding=True
-                )
-                
-                # Get embeddings
+
+                # Get backbone embedding
+                emb = self._get_backbone_embedding(name, backbone, processor, waveform, sample_rate)
+
+                # Concatenate with hand-crafted features
+                x = np.concatenate([emb, hc_feat])
+                x_tensor = torch.tensor(x, dtype=torch.float32).unsqueeze(0)
+
+                # Run through trained FusionClassifier
                 with torch.no_grad():
-                    outputs = backbone(**inputs)
-                    embeddings = outputs.last_hidden_state.mean(dim=1)
-                    
-                    # Classify
-                    logits = classifier(embeddings)
+                    logits = classifier(x_tensor)
                     probs = F.softmax(logits, dim=-1).numpy()[0]
-                
-                # Apply equal weight
+
                 weighted_probs = probs * self.weights[name]
                 all_probs.append(weighted_probs)
-                
-                # Store individual result
+
                 pred_idx = np.argmax(probs)
                 backbone_results[name] = {
                     "class": self.classes[pred_idx],
                     "confidence": float(probs[pred_idx])
                 }
-                
             except Exception as e:
                 logger.warning(f"Backbone {name} failed: {e}")
-        
+
         if len(all_probs) == 0:
             return self._fallback_classify(waveform, sample_rate)
-        
-        # Combine weighted probabilities
+
         ensemble_probs = np.sum(all_probs, axis=0)
-        
-        # Get prediction
         pred_idx = np.argmax(ensemble_probs)
         pred_class = self.classes[pred_idx]
         confidence = float(ensemble_probs[pred_idx])
-        
         risk_level = RISK_MAP.get(pred_class, "YELLOW")
         display_label = DISPLAY_LABELS.get(pred_class, pred_class)
-        
-        # Determine task type
-        task = "cry" if pred_class.startswith("cry_") else "respiratory"
-        
+        task = "cry" if pred_class in CRY_CLASSES else "health"
+
         return {
             "classification": pred_class,
             "display_label": display_label,
@@ -361,6 +512,7 @@ class SixBackboneEnsemble:
             "task": task,
             "all_probs": {c: float(p) for c, p in zip(self.classes, ensemble_probs)},
             "backbone_results": backbone_results,
+            "recommendation": RECOMMENDATIONS.get(pred_class, ""),
             "model": f"ensemble-{len(self.backbones)}backbone"
         }
     
@@ -371,16 +523,16 @@ class SixBackboneEnsemble:
         
         # Simple rules
         if energy < 0.05:
-            pred_class = "cry_normal"
+            pred_class = "normal_cry"
             confidence = 0.6
         elif energy > 0.4 and zcr > 0.1:
-            pred_class = "cry_pain"
+            pred_class = "pain_cry"
             confidence = 0.5
         elif energy > 0.3:
-            pred_class = "cry_hungry"
+            pred_class = "hungry_cry"
             confidence = 0.5
         else:
-            pred_class = "cry_discomfort"
+            pred_class = "discomfort_cry"
             confidence = 0.45
         
         risk_level = RISK_MAP.get(pred_class, "YELLOW")
@@ -902,7 +1054,7 @@ class WebDashboard:
 <body>
     <div class="container">
         <h1>👶 Baby Cry & Respiratory Monitor</h1>
-        <p class="subtitle">6-Backbone AI Ensemble | 16 Classifications | Real-time Analysis</p>
+        <p class="subtitle">6-Backbone AI Ensemble | 20 Classifications | Cry-Based Disease Detection | INMP441 Mic</p>
         
         <div class="grid">
             <!-- Main Status Card -->
@@ -939,29 +1091,33 @@ class WebDashboard:
             <div class="card">
                 <div class="section-title"><span>👶</span> Baby Cry Classifications</div>
                 <div class="class-grid" id="cryClasses">
-                    <div class="class-item" data-class="cry_cold">Cold/Chill</div>
-                    <div class="class-item" data-class="cry_discomfort">Discomfort</div>
-                    <div class="class-item" data-class="cry_distress">Distress</div>
-                    <div class="class-item" data-class="cry_hungry">Hungry</div>
-                    <div class="class-item" data-class="cry_normal">Normal</div>
-                    <div class="class-item" data-class="cry_pain">Pain</div>
-                    <div class="class-item" data-class="cry_sleepy">Sleepy</div>
-                    <div class="class-item" data-class="cry_tired">Tired</div>
+                    <div class="class-item" data-class="hungry_cry">Hungry</div>
+                    <div class="class-item" data-class="pain_cry">Pain</div>
+                    <div class="class-item" data-class="sleepy_cry">Sleepy</div>
+                    <div class="class-item" data-class="discomfort_cry">Discomfort</div>
+                    <div class="class-item" data-class="cold_cry">Cold/Hot</div>
+                    <div class="class-item" data-class="tired_cry">Tired</div>
+                    <div class="class-item" data-class="normal_cry">Normal</div>
+                    <div class="class-item" data-class="distress_cry">Distress</div>
+                    <div class="class-item" data-class="belly_pain_cry">Belly Pain</div>
+                    <div class="class-item" data-class="burping_cry">Burping</div>
+                    <div class="class-item" data-class="pathological_cry">⚠️ Pathological</div>
+                    <div class="class-item" data-class="asphyxia_cry">🚨 Asphyxia</div>
                 </div>
             </div>
-            
-            <!-- Respiratory Classes -->
+
+            <!-- Health/Disease Detection from Cry -->
             <div class="card">
-                <div class="section-title"><span>🫁</span> Respiratory Classifications</div>
-                <div class="class-grid" id="respClasses">
-                    <div class="class-item" data-class="resp_coarse_crackle">Coarse Crackle</div>
-                    <div class="class-item" data-class="resp_fine_crackle">Fine Crackle</div>
-                    <div class="class-item" data-class="resp_mixed">Mixed</div>
-                    <div class="class-item" data-class="resp_normal">Normal</div>
-                    <div class="class-item" data-class="resp_rhonchi">Rhonchi</div>
-                    <div class="class-item" data-class="resp_stridor">Stridor</div>
-                    <div class="class-item" data-class="resp_wheeze">Wheeze</div>
-                    <div class="class-item" data-class="resp_mixed_crackle_wheeze">Mixed Crackle/Wheeze</div>
+                <div class="section-title"><span>🩺</span> Health Detection (from Cry & Sound)</div>
+                <div class="class-grid" id="healthClasses">
+                    <div class="class-item" data-class="sepsis_cry">🚨 Sepsis</div>
+                    <div class="class-item" data-class="colic_cry">Colic</div>
+                    <div class="class-item" data-class="pneumonia_cry">🚨 Pneumonia</div>
+                    <div class="class-item" data-class="respiratory_distress">⚠️ Resp Distress</div>
+                    <div class="class-item" data-class="normal_breathing">Normal Breathing</div>
+                    <div class="class-item" data-class="wheezing">Wheezing</div>
+                    <div class="class-item" data-class="stridor">⚠️ Stridor</div>
+                    <div class="class-item" data-class="bronchiolitis">🚨 Bronchiolitis</div>
                 </div>
             </div>
             
@@ -1081,7 +1237,7 @@ async def main(config: dict):
     logger.info("=" * 50)
     
     # Initialize components
-    classifier = LightweightCryClassifier(
+    classifier = SixBackboneEnsemble(
         use_quantization=config["model"].get("use_quantization", True)
     )
     await classifier.initialize()

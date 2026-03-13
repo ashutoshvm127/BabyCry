@@ -9,7 +9,7 @@ import html2canvas from 'html2canvas';
 const AUTH_STORAGE_KEY = 'crycare_auth_logged_in';
 
 // API base URL
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8001';
+const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
 
 // Stats interface
 interface AppStats {
@@ -88,6 +88,15 @@ const transformBackendResponse = (data: any): AnalysisResult | null => {
     return null;
   }
   const d = data.diagnosis;
+  const rawBiomarkers = d.biomarkers || {};
+  const biomarkers = {
+    f0_mean: Number(rawBiomarkers.f0_mean ?? rawBiomarkers.fundamental_frequency ?? 0),
+    f0_std: Number(rawBiomarkers.f0_std ?? 0),
+    spectral_centroid: Number(rawBiomarkers.spectral_centroid ?? 0),
+    hnr: Number(rawBiomarkers.hnr ?? 0),
+    energy_rms: Number(rawBiomarkers.energy_rms ?? rawBiomarkers.mean_energy ?? 0),
+    zcr: Number(rawBiomarkers.zcr ?? rawBiomarkers.zero_crossing_rate ?? rawBiomarkers.zcr_mean ?? 0),
+  };
   const riskColorMap: Record<string, string> = { GREEN: '#22c55e', YELLOW: '#eab308', RED: '#ef4444' };
   return {
     id: d.id || '',
@@ -97,7 +106,7 @@ const transformBackendResponse = (data: any): AnalysisResult | null => {
       model: d.model_used || 'ensemble',
       cry_detected: true,
     },
-    biomarkers: d.biomarkers || { f0_mean: 0, f0_std: 0, spectral_centroid: 0, hnr: 0, energy_rms: 0, zcr: 0 },
+    biomarkers,
     risk_level: d.risk_level || 'GREEN',
     risk_color: riskColorMap[d.risk_level] || '#22c55e',
     recommended_action: (d.recommendations && d.recommendations.length > 0) ? d.recommendations[0] : 'Monitor condition',
@@ -760,13 +769,10 @@ function RecordPage({ onScanComplete }: { onScanComplete?: (result: AnalysisResu
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [treatmentPlan, setTreatmentPlan] = useState<TreatmentPlan | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const analyserRef = useRef<AnalyserNode | null>(null);
-  const audioChunksRef = useRef<Float32Array[]>([]);
-  const streamRef = useRef<MediaStream | null>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const animFrameRef = useRef<number>(0);
   const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
+  const recordAbortRef = useRef<AbortController | null>(null);
 
   // Fetch medicine recommendations when result changes
   useEffect(() => {
@@ -784,6 +790,13 @@ function RecordPage({ onScanComplete }: { onScanComplete?: (result: AnalysisResu
     }
   }, [result]);
 
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+      if (recordAbortRef.current) recordAbortRef.current.abort();
+    };
+  }, []);
+
   const formatDuration = (s: number) => {
     const h = Math.floor(s / 3600).toString().padStart(2, '0');
     const m = Math.floor((s % 3600) / 60).toString().padStart(2, '0');
@@ -793,108 +806,86 @@ function RecordPage({ onScanComplete }: { onScanComplete?: (result: AnalysisResu
 
   const drawWaveform = useCallback(() => {
     const canvas = canvasRef.current;
-    const analyser = analyserRef.current;
-    if (!canvas || !analyser) return;
+    if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
+
     const w = canvas.width;
     const h = canvas.height;
-    const bufferLength = analyser.frequencyBinCount;
-    const dataArray = new Uint8Array(bufferLength);
-    analyser.getByteTimeDomainData(dataArray);
+
     ctx.fillStyle = '#0f172a';
     ctx.fillRect(0, 0, w, h);
+
+    // Baseline
+    ctx.strokeStyle = 'rgba(148, 163, 184, 0.4)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0, h / 2);
+    ctx.lineTo(w, h / 2);
+    ctx.stroke();
+
+    // Simulated live waveform for server-side recording mode
     ctx.lineWidth = 2;
     ctx.strokeStyle = '#3b82f6';
     ctx.beginPath();
-    const sliceWidth = w / bufferLength;
+    const points = 220;
+    const sliceWidth = w / points;
     let x = 0;
-    for (let i = 0; i < bufferLength; i++) {
-      const v = dataArray[i] / 128.0;
-      const y = (v * h) / 2;
+
+    for (let i = 0; i < points; i++) {
+      const phase = (Date.now() / 180) + (i * 0.22);
+      const noise = (Math.random() - 0.5) * 0.18;
+      const amplitude = isRecording ? (Math.sin(phase) * 0.24 + noise) : 0;
+      const y = h / 2 + amplitude * h / 2;
       if (i === 0) ctx.moveTo(x, y);
       else ctx.lineTo(x, y);
       x += sliceWidth;
     }
+
     ctx.lineTo(w, h / 2);
     ctx.stroke();
-    // Draw bars
-    analyser.getByteFrequencyData(dataArray);
-    const barW = Math.max(2, (w / bufferLength) * 4);
-    for (let i = 0; i < bufferLength / 2; i++) {
-      const barH = (dataArray[i] / 255) * h * 0.8;
-      const bx = (w / 2) + (i - bufferLength / 4) * barW * 0.5;
-      if (bx >= 0 && bx <= w) {
-        ctx.fillStyle = `rgba(59, 130, 246, ${0.3 + (dataArray[i] / 255) * 0.7})`;
-        ctx.fillRect(bx, (h - barH) / 2, barW * 0.3, barH);
-      }
-    }
+
     if (isRecording) animFrameRef.current = requestAnimationFrame(drawWaveform);
   }, [isRecording]);
 
-  const floatTo16BitPCM = (output: DataView, offset: number, input: Float32Array) => {
-    for (let i = 0; i < input.length; i++, offset += 2) {
-      const s = Math.max(-1, Math.min(1, input[i]));
-      output.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
-    }
-  };
-
-  const createWavBlob = (samples: Float32Array, sampleRate: number): Blob => {
-    const buffer = new ArrayBuffer(44 + samples.length * 2);
-    const view = new DataView(buffer);
-    const ws = (v: DataView, o: number, s: string) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
-    ws(view, 0, 'RIFF');
-    view.setUint32(4, 36 + samples.length * 2, true);
-    ws(view, 8, 'WAVE');
-    ws(view, 12, 'fmt ');
-    view.setUint32(16, 16, true);
-    view.setUint16(20, 1, true);
-    view.setUint16(22, 1, true);
-    view.setUint32(24, sampleRate, true);
-    view.setUint32(28, sampleRate * 2, true);
-    view.setUint16(32, 2, true);
-    view.setUint16(34, 16, true);
-    ws(view, 36, 'data');
-    view.setUint32(40, samples.length * 2, true);
-    floatTo16BitPCM(view, 44, samples);
-    return new Blob([buffer], { type: 'audio/wav' });
-  };
-
   const startRecording = async () => {
     setMicError('');
+    setIsRecording(true);
+    setRecordingTime(0);
+    setResult(null);
+    setAudioUrl(null);
+    setHasRecorded(false);
+
+    const captureDuration = 5;
+    const controller = new AbortController();
+    recordAbortRef.current = controller;
+
+    if (timerRef.current) clearInterval(timerRef.current);
+    timerRef.current = setInterval(() => setRecordingTime(p => p + 1), 1000);
+
+    setIsLoading(true);
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: { sampleRate: 16000, channelCount: 1, echoCancellation: true, noiseSuppression: true } });
-      streamRef.current = stream;
-      const audioContext = new AudioContext({ sampleRate: 16000 });
-      audioContextRef.current = audioContext;
-      const source = audioContext.createMediaStreamSource(stream);
-      const analyser = audioContext.createAnalyser();
-      analyser.fftSize = 2048;
-      analyserRef.current = analyser;
-      const processor = audioContext.createScriptProcessor(4096, 1, 1);
-      audioChunksRef.current = [];
-      processor.onaudioprocess = (e) => {
-        const copy = new Float32Array(e.inputBuffer.getChannelData(0).length);
-        copy.set(e.inputBuffer.getChannelData(0));
-        audioChunksRef.current.push(copy);
-      };
-      source.connect(analyser);
-      analyser.connect(processor);
-      processor.connect(audioContext.destination);
-      setIsRecording(true);
-      setRecordingTime(0);
-      setResult(null);
-      setAudioUrl(null);
-      timerRef.current = setInterval(() => setRecordingTime(p => p + 1), 1000);
-    } catch (err: any) {
-      console.error('Mic error:', err);
-      if (err.name === 'NotAllowedError') {
-        setMicError('Microphone access denied. Please allow microphone permission in your browser settings and try again.');
-      } else if (err.name === 'NotFoundError') {
-        setMicError('No microphone detected. Please connect a microphone and try again.');
-      } else {
-        setMicError('Failed to access microphone: ' + (err.message || 'Unknown error'));
+      const response = await fetch(
+        `${API_URL}/api/v1/record-and-analyze?duration_sec=${captureDuration}`,
+        { method: 'POST', signal: controller.signal }
+      );
+      if (!response.ok) throw new Error(`Server error: ${response.status}`);
+      const data = await response.json();
+      const transformed = transformBackendResponse(data);
+      setResult(transformed);
+      setHasRecorded(true);
+
+      if (onScanComplete && transformed) {
+        onScanComplete(transformed);
       }
+    } catch (err: any) {
+      console.error('Server-side recording/analysis failed:', err);
+      setMicError(`RPi microphone capture failed: ${err?.message || 'unknown error'}`);
+    } finally {
+      if (timerRef.current) clearInterval(timerRef.current);
+      recordAbortRef.current = null;
+      setIsRecording(false);
+      setIsLoading(false);
     }
   };
 
@@ -908,38 +899,14 @@ function RecordPage({ onScanComplete }: { onScanComplete?: (result: AnalysisResu
     return () => { if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current); };
   }, [isRecording, drawWaveform]);
 
-  const stopRecording = async () => {
-    setIsRecording(false);
-    setHasRecorded(true);
-    if (timerRef.current) clearInterval(timerRef.current);
-    if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
-    if (audioContextRef.current) await audioContextRef.current.close();
-    const totalLength = audioChunksRef.current.reduce((a, c) => a + c.length, 0);
-    const combined = new Float32Array(totalLength);
-    let offset = 0;
-    for (const chunk of audioChunksRef.current) { combined.set(chunk, offset); offset += chunk.length; }
-    const wavBlob = createWavBlob(combined, 16000);
-    // Create audio URL for playback
-    const url = URL.createObjectURL(wavBlob);
-    setAudioUrl(url);
-    setIsLoading(true);
-    try {
-      const formData = new FormData();
-      formData.append('audio_file', wavBlob, 'recording.wav');
-      const response = await fetch(`${API_URL}/api/v1/analyze`, { method: 'POST', body: formData });
-      if (!response.ok) throw new Error(`Server error: ${response.status}`);
-      const data = await response.json();
-      const transformed = transformBackendResponse(data);
-      setResult(transformed);
-      // Save scan to history with audio blob
-      if (onScanComplete && transformed) {
-        onScanComplete(transformed, wavBlob);
-      }
-    } catch (err: any) {
-      console.error('Analysis failed:', err);
-    } finally {
-      setIsLoading(false);
+  const stopRecording = () => {
+    if (recordAbortRef.current) {
+      recordAbortRef.current.abort();
     }
+    setIsRecording(false);
+    if (timerRef.current) clearInterval(timerRef.current);
+    setIsLoading(false);
+    setMicError('Recording request cancelled.');
   };
 
   const detectionLabel = result?.classification.label.replace(/_/g, ' ') || 'Waiting...';
@@ -993,14 +960,14 @@ function RecordPage({ onScanComplete }: { onScanComplete?: (result: AnalysisResu
                     {isRecording ? Icons.stop : Icons.mic}
                   </span>
                   <span className="record-btn-label">
-                    {isRecording ? 'Stop Recording' : 'Start Recording'}
+                    {isRecording ? 'Cancel Recording' : 'Start Recording'}
                   </span>
                   {isRecording && <span className="record-btn-time">{formatDuration(recordingTime)}</span>}
                 </button>
                 <p className="record-hint">
                   {isRecording
-                    ? 'Recording in progress... Click to stop and analyze.'
-                    : 'Click the button above to begin capturing audio from your microphone.'}
+                    ? 'Recording from Raspberry Pi microphone and processing automatically... click Cancel to stop.'
+                    : 'Click to start server-side recording from the Raspberry Pi INMP441 microphone.'}
                 </p>
               </div>
             </div>

@@ -40,6 +40,77 @@ def convert_numpy_types(obj):
         return [convert_numpy_types(i) for i in obj]
     return obj
 
+
+def normalize_biomarker_keys(biomarkers: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Normalize biomarker keys so frontend/report consumers always receive
+    the expected field names, while preserving original backend keys.
+    """
+    if not isinstance(biomarkers, dict):
+        biomarkers = {}
+
+    normalized = dict(biomarkers)
+    normalized["f0_mean"] = float(normalized.get("f0_mean", normalized.get("fundamental_frequency", 0.0)))
+    normalized["f0_std"] = float(normalized.get("f0_std", 0.0))
+    normalized["energy_rms"] = float(normalized.get("energy_rms", normalized.get("mean_energy", 0.0)))
+    normalized["zcr"] = float(normalized.get("zcr", normalized.get("zero_crossing_rate", 0.0)))
+    normalized["spectral_centroid"] = float(normalized.get("spectral_centroid", 0.0))
+    normalized["hnr"] = float(normalized.get("hnr", 0.0))
+    return normalized
+
+
+def record_server_microphone(duration_sec: float, sample_rate: int, channels: int = 1) -> np.ndarray:
+    """Capture audio from the server-side microphone (RPi I2S/default device)."""
+    duration_sec = float(max(1.0, min(duration_sec, 30.0)))
+    frame_count = int(sample_rate * duration_sec)
+
+    device_index = None
+    if SYSTEM_CONFIG is not None and hasattr(SYSTEM_CONFIG, "audio"):
+        device_index = getattr(SYSTEM_CONFIG.audio, "device_index", None)
+
+    try:
+        import sounddevice as sd
+
+        recording = sd.rec(
+            frame_count,
+            samplerate=sample_rate,
+            channels=channels,
+            dtype="float32",
+            device=device_index
+        )
+        sd.wait()
+        return recording.reshape(-1)
+    except Exception as sounddevice_error:
+        try:
+            import pyaudio
+
+            pa = pyaudio.PyAudio()
+            stream = pa.open(
+                format=pyaudio.paInt16,
+                channels=channels,
+                rate=sample_rate,
+                input=True,
+                frames_per_buffer=1024,
+                input_device_index=device_index
+            )
+
+            frames: List[np.ndarray] = []
+            for _ in range(int(sample_rate / 1024 * duration_sec)):
+                chunk = stream.read(1024, exception_on_overflow=False)
+                frames.append(np.frombuffer(chunk, dtype=np.int16).astype(np.float32) / 32768.0)
+
+            stream.stop_stream()
+            stream.close()
+            pa.terminate()
+
+            if not frames:
+                raise RuntimeError("No audio frames captured")
+            return np.concatenate(frames)
+        except Exception as pyaudio_error:
+            raise RuntimeError(
+                f"Server microphone capture failed (sounddevice={sounddevice_error}, pyaudio={pyaudio_error})"
+            )
+
 # Add parent directory to path for config import
 sys.path.insert(0, str(Path(__file__).parent.parent))
 sys.path.insert(0, str(Path(__file__).parent))
@@ -190,6 +261,7 @@ async def root():
         "mode": "RPi5" if IS_RPI5_MODE else "Desktop",
         "endpoints": {
             "analyze": "/api/v1/analyze",
+            "record_and_analyze": "/api/v1/record-and-analyze",
             "stream": "/ws/stream",
             "report": "/api/v1/report/{diagnosis_id}",
             "config": "/api/v1/config",
@@ -287,6 +359,7 @@ async def analyze_audio(
             audio_data["waveform"],
             audio_data["sample_rate"]
         )
+        biomarkers = normalize_biomarker_keys(biomarkers)
         
         # Calculate risk level
         risk_level, risk_score = calculate_risk_level(
@@ -325,6 +398,79 @@ async def analyze_audio(
         
         return AudioUploadResponse(success=True, diagnosis=diagnosis)
         
+    except Exception as e:
+        return AudioUploadResponse(success=False, error=str(e))
+
+
+@app.post("/api/v1/record-and-analyze", response_model=AudioUploadResponse)
+async def record_and_analyze(duration_sec: float = 5.0):
+    """
+    Record audio directly from the server-side microphone (RPi I2S/default mic),
+    then run the same analysis pipeline used for uploaded audio.
+    """
+    try:
+        if duration_sec < 1.0 or duration_sec > 30.0:
+            raise HTTPException(status_code=400, detail="duration_sec must be between 1 and 30 seconds")
+
+        target_sample_rate = 16000
+        if SYSTEM_CONFIG is not None and hasattr(SYSTEM_CONFIG, "audio"):
+            target_sample_rate = int(getattr(SYSTEM_CONFIG.audio, "sample_rate", 16000))
+
+        waveform = await asyncio.to_thread(
+            record_server_microphone,
+            duration_sec,
+            target_sample_rate,
+            1
+        )
+
+        if waveform is None or len(waveform) == 0:
+            raise RuntimeError("No audio captured from server microphone")
+
+        # Run ensemble classification with AUTO-DETECTION
+        classification = await ensemble_model.predict_auto(waveform)
+
+        # Extract biomarkers
+        biomarkers = biomarker_analyzer.analyze(waveform, target_sample_rate)
+        biomarkers = normalize_biomarker_keys(biomarkers)
+
+        # Calculate risk level
+        risk_level, risk_score = calculate_risk_level(classification, biomarkers)
+
+        # Generate recommendations
+        recommendations = generate_recommendations(classification, biomarkers, risk_level)
+
+        # Convert numpy types to native Python types for JSON serialization
+        classification = convert_numpy_types(classification)
+        biomarkers = convert_numpy_types(biomarkers)
+        risk_score = convert_numpy_types(risk_score)
+
+        # Create diagnosis result
+        diagnosis_id = str(uuid.uuid4())
+        diagnosis = DiagnosisResult(
+            id=diagnosis_id,
+            timestamp=datetime.now().isoformat(),
+            primary_classification=classification["label"],
+            confidence=classification["confidence"],
+            model_used=classification["model"],
+            risk_level=risk_level,
+            risk_score=risk_score,
+            biomarkers=biomarkers,
+            recommendations=recommendations
+        )
+
+        audio_data = {
+            "waveform": waveform,
+            "sample_rate": target_sample_rate,
+            "duration_seconds": len(waveform) / target_sample_rate,
+            "format": "server_mic",
+            "num_samples": len(waveform)
+        }
+        _store_diagnosis(diagnosis_id, diagnosis, audio_data)
+
+        return AudioUploadResponse(success=True, diagnosis=diagnosis)
+
+    except HTTPException:
+        raise
     except Exception as e:
         return AudioUploadResponse(success=False, error=str(e))
 
