@@ -18,18 +18,18 @@ python-dotenv>=1.0.0
 # Audio Processing
 librosa>=0.10.1
 soundfile>=0.12.1
-scipy>=1.11.0
-numpy>=1.24.0,<2.0.0
+scipy>=1.12.0
+numpy>=1.26.0
 sounddevice>=0.4.6
 pyaudio>=0.2.14
 
 # Machine Learning - Core
-torch>=2.0.0
-torchaudio>=2.0.0
-transformers>=4.35.0
+torch>=2.1.0
+torchaudio>=2.1.0
+transformers>=4.36.0
 
 # TensorFlow (for YAMNet fallback)
-tensorflow>=2.14.0
+tensorflow>=2.15.0
 tensorflow_hub>=0.15.0
 
 # PDF Generation

@@ -1,7 +1,7 @@
 # Baby Cry Diagnostic System
 
 ![Version](https://img.shields.io/badge/version-1.0.0-blue)
-![Python](https://img.shields.io/badge/python-3.11+-green)
+![Python](https://img.shields.io/badge/python-3.13+-green)
 ![License](https://img.shields.io/badge/license-MIT-orange)
 
 AI-powered infant cry analysis system for respiratory health monitoring. Uses an ensemble of deep learning models to classify baby cries and extract medical biomarkers.
@@ -71,7 +71,7 @@ baby_cry_diagnostic/
 
 ### Prerequisites
 
-- Python 3.11+
+- Python 3.13+
 - Node.js 18+
 - Docker & Docker Compose (optional)
 - CUDA-capable GPU (optional, for faster inference)

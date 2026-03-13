@@ -3,7 +3,7 @@
 # Standalone Dockerfile - works when Root Directory is set to cloud_deployment
 # ==============================================================================
 
-FROM python:3.11-slim
+FROM python:3.13-slim
 
 # Prevent Python from writing .pyc files and buffering stdout/stderr
 ENV PYTHONDONTWRITEBYTECODE=1

@@ -11,7 +11,7 @@ sounddevice>=0.4.6  # Preferred - easier to install
 aiohttp>=3.9.0
 
 # Signal Processing
-numpy>=1.24.0
+numpy>=1.26.0
 
 # Display (OLED) - Optional
 pillow>=10.0.0

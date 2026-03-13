@@ -7,11 +7,11 @@
 sounddevice>=0.4.6
 
 # Machine Learning (lightweight)
-torch>=2.0.0
-transformers>=4.30.0
+torch>=2.1.0
+transformers>=4.35.0
 
 # Signal Processing
-numpy>=1.24.0
+numpy>=1.26.0
 
 # Web Dashboard
 fastapi>=0.100.0
