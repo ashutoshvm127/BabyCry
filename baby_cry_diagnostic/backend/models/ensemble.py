@@ -191,8 +191,9 @@ class EnsembleModel:
             model_name = self.model_configs["distilhubert"]["name"]
             hidden_size = self.model_configs["distilhubert"]["hidden_size"]
             
+            print(f"    Loading DistilHuBERT from {model_name}...")
             self.processors["distilhubert"] = AutoFeatureExtractor.from_pretrained(model_name)
-            self.models["distilhubert"] = AutoModel.from_pretrained(model_name).to(self.device)
+            self.models["distilhubert"] = AutoModel.from_pretrained(model_name, trust_remote_code=True).to(self.device)
             self.models["distilhubert"].eval()
             
             # Cry classification head
@@ -214,19 +215,20 @@ class EnsembleModel:
             print("    [OK] DistilHuBERT loaded (cry_weight=1.0, pulm_weight=0.6)")
             
         except Exception as e:
-            print(f"    [!] DistilHuBERT failed: {e}")
+            print(f"    [!] DistilHuBERT failed: {type(e).__name__}: {e}")
             self.models["distilhubert"] = None
     
     async def _load_ast(self):
         """Load Audio Spectrogram Transformer with classification heads"""
         try:
-            from transformers import ASTForAudioClassification, ASTFeatureExtractor
+            from transformers import AutoModel, AutoFeatureExtractor
             
             model_name = self.model_configs["ast"]["name"]
             hidden_size = self.model_configs["ast"]["hidden_size"]
             
-            self.processors["ast"] = ASTFeatureExtractor.from_pretrained(model_name)
-            self.models["ast"] = ASTForAudioClassification.from_pretrained(model_name).to(self.device)
+            print(f"    Loading AST from {model_name}...")
+            self.processors["ast"] = AutoFeatureExtractor.from_pretrained(model_name)
+            self.models["ast"] = AutoModel.from_pretrained(model_name, trust_remote_code=True).to(self.device)
             self.models["ast"].eval()
             
             # Cry classification head (uses AudioSet embeddings)
@@ -248,51 +250,66 @@ class EnsembleModel:
             print("    [OK] AST loaded (cry_weight=0.7, pulm_weight=0.9)")
             
         except Exception as e:
-            print(f"    [!] AST failed: {e}")
+            print(f"    [!] AST failed: {type(e).__name__}: {e}")
             self.models["ast"] = None
     
     async def _load_yamnet(self):
-        """Load YAMNet TensorFlow model"""
+        """Load YAMNet TensorFlow model (skipped on Python 3.12+ due to imp module removal)"""
         try:
-            import tensorflow as tf
-            import tensorflow_hub as hub
+            import sys
             
-            # Load YAMNet from TensorFlow Hub
-            self.models["yamnet"] = hub.load('https://tfhub.dev/google/yamnet/1')
+            # YAMNet doesn't work well on Python 3.12+ (imp module was removed)
+            if sys.version_info >= (3, 12):
+                print("    [!] YAMNet skipped on Python 3.12+ (requires deprecated imp module)")
+                self.models["yamnet"] = None
+                return
             
-            # YAMNet outputs 1024-dim embeddings, add classification heads
-            hidden_size = self.model_configs["yamnet"]["hidden_size"]
-            
-            self.classifiers["yamnet_cry"] = nn.Sequential(
-                nn.Linear(hidden_size, 256),
-                nn.ReLU(),
-                nn.Dropout(0.3),
-                nn.Linear(256, len(self.cry_classes))
-            ).to(self.device)
-            
-            self.classifiers["yamnet_pulmonary"] = nn.Sequential(
-                nn.Linear(hidden_size, 256),
-                nn.ReLU(),
-                nn.Dropout(0.3),
-                nn.Linear(256, len(self.pulmonary_classes))
-            ).to(self.device)
-            
-            print("    [OK] YAMNet loaded (cry_weight=0.5, pulm_weight=0.5)")
+            try:
+                import tensorflow as tf
+                import tensorflow_hub as hub
+                print("    Loading YAMNet from TensorFlow Hub...")
+                
+                # Load YAMNet from TensorFlow Hub
+                self.models["yamnet"] = hub.load('https://tfhub.dev/google/yamnet/1')
+                
+                # YAMNet outputs 1024-dim embeddings, add classification heads
+                hidden_size = self.model_configs["yamnet"]["hidden_size"]
+                
+                self.classifiers["yamnet_cry"] = nn.Sequential(
+                    nn.Linear(hidden_size, 256),
+                    nn.ReLU(),
+                    nn.Dropout(0.3),
+                    nn.Linear(256, len(self.cry_classes))
+                ).to(self.device)
+                
+                self.classifiers["yamnet_pulmonary"] = nn.Sequential(
+                    nn.Linear(hidden_size, 256),
+                    nn.ReLU(),
+                    nn.Dropout(0.3),
+                    nn.Linear(256, len(self.pulmonary_classes))
+                ).to(self.device)
+                
+                print("    [OK] YAMNet loaded (cry_weight=0.5, pulm_weight=0.5)")
+            except ImportError:
+                print("    [!] YAMNet skipped (tensorflow and tensorflow_hub not installed)")
+                print("        Install with: pip install tensorflow tensorflow-hub")
+                self.models["yamnet"] = None
             
         except Exception as e:
-            print(f"    [!] YAMNet failed: {e}")
+            print(f"    [!] YAMNet failed: {type(e).__name__}: {e}")
             self.models["yamnet"] = None
     
     async def _load_wav2vec2(self):
         """Load Wav2Vec2 - excellent for cry vocalization patterns"""
         try:
-            from transformers import Wav2Vec2Model, Wav2Vec2FeatureExtractor
+            from transformers import AutoModel, AutoFeatureExtractor
             
             model_name = self.model_configs["wav2vec2"]["name"]
             hidden_size = self.model_configs["wav2vec2"]["hidden_size"]
             
-            self.processors["wav2vec2"] = Wav2Vec2FeatureExtractor.from_pretrained(model_name)
-            self.models["wav2vec2"] = Wav2Vec2Model.from_pretrained(model_name).to(self.device)
+            print(f"    Loading Wav2Vec2 from {model_name}...")
+            self.processors["wav2vec2"] = AutoFeatureExtractor.from_pretrained(model_name)
+            self.models["wav2vec2"] = AutoModel.from_pretrained(model_name, trust_remote_code=True).to(self.device)
             self.models["wav2vec2"].eval()
             
             # Cry classification head
@@ -314,20 +331,21 @@ class EnsembleModel:
             print("    [OK] Wav2Vec2 loaded (cry_weight=0.95, pulm_weight=0.7)")
             
         except Exception as e:
-            print(f"    [!] Wav2Vec2 failed: {e}")
+            print(f"    [!] Wav2Vec2 failed: {type(e).__name__}: {e}")
             self.models["wav2vec2"] = None
     
     async def _load_wavlm(self):
         """Load WavLM - noise-robust audio understanding"""
         try:
-            from transformers import WavLMModel, Wav2Vec2FeatureExtractor
+            from transformers import AutoModel, AutoFeatureExtractor
             
             model_name = self.model_configs["wavlm"]["name"]
             hidden_size = self.model_configs["wavlm"]["hidden_size"]
             
+            print(f"    Loading WavLM from {model_name}...")
             # WavLM uses same feature extractor as Wav2Vec2
-            self.processors["wavlm"] = Wav2Vec2FeatureExtractor.from_pretrained(model_name)
-            self.models["wavlm"] = WavLMModel.from_pretrained(model_name).to(self.device)
+            self.processors["wavlm"] = AutoFeatureExtractor.from_pretrained(model_name)
+            self.models["wavlm"] = AutoModel.from_pretrained(model_name, trust_remote_code=True).to(self.device)
             self.models["wavlm"].eval()
             
             # Cry classification head
@@ -349,7 +367,7 @@ class EnsembleModel:
             print("    [OK] WavLM loaded (cry_weight=0.9, pulm_weight=0.75)")
             
         except Exception as e:
-            print(f"    [!] WavLM failed: {e}")
+            print(f"    [!] WavLM failed: {type(e).__name__}: {e}")
             self.models["wavlm"] = None
     
     async def _load_panns(self):
