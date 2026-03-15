@@ -1,5 +1,5 @@
 {
-  "is_rpi5_mode": false,
+  "is_rpi5_mode": true,
   "audio": {
     "sample_rate": 16000,
     "bit_depth": 16,
